@@ -888,13 +888,13 @@ def api_emotes():
         except Exception as e:
             logger.warning(f"Twitch channel emotes: {e}")
 
-        # Twitch emote sets (from IRC JOIN — subscriber emotes of other channels)
+        # Twitch emote sets (from IRC — subscriber emotes of other channels)
         if twitch_bot and twitch_bot.emote_sets:
             for es_id in twitch_bot.emote_sets:
                 if es_id in ('0', ''):
                     continue
                 try:
-                    r = fetch_with_retry(f"https://api.twitch.tv/helix/chat/emotes?emote_set_id={es_id}", headers=headers)
+                    r = fetch_with_retry(f"https://api.twitch.tv/helix/chat/emotes/set?emote_set_id={es_id}", headers=headers)
                     if r.status_code == 200:
                         for e in r.json().get("data", []):
                             emotes[e["name"]] = f"https://static-cdn.jtvnw.net/emoticons/v2/{e['id']}/default/dark/1.0"

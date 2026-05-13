@@ -120,17 +120,20 @@ class TwitchIRCBot:
                     tags[tag] = None
             line = parts[1] if len(parts) > 1 else ''
 
+        # GLOBALUSERSTATE / USERSTATE — содержит emote-sets (все наборы смайлов юзера)
+        if 'GLOBALUSERSTATE' in raw_line or 'USERSTATE' in raw_line:
+            es = tags.get('emote-sets', '')
+            if es:
+                self.emote_sets = es.split(',')
+                logger.info(f"Got emote sets from {'GLOBALUSERSTATE' if 'GLOBALUSERSTATE' in raw_line else 'USERSTATE'}: {self.emote_sets}")
+            return
+
         # Обработка успешного присоединения к каналу
         if f"JOIN {self.channel}" in raw_line and f":{self.nick}!{self.nick}@{self.nick}.tmi.twitch.tv" in raw_line:
             if not self._connected:
                 self._connected = True
                 self._connect_event.set()
-                es = tags.get('emote-sets', '')
-                if es:
-                    self.emote_sets = es.split(',')
-                    logger.info(f"IRC bot joined {self.channel}, emote sets: {self.emote_sets}")
-                else:
-                    logger.info(f"IRC bot successfully joined {self.channel}")
+                logger.info(f"IRC bot successfully joined {self.channel}")
             return
 
         match = re.match(r":(\w+)!\1@\1\.tmi\.twitch\.tv PRIVMSG #\w+ :(.*)", line)
