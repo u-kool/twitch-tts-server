@@ -1261,6 +1261,9 @@ def print_banner():
     logger.info("🚀 Server starting...")
 
 if __name__ == "__main__":
+    # Save PID for start_server.bat to kill previous instance
+    with open("server.pid", "w") as f:
+        f.write(str(os.getpid()))
     print_banner()
     auto_start_twitch()
     try:
