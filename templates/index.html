@@ -658,6 +658,9 @@
             const advDiv = div.querySelector('.advanced-settings');
             advBtn.onclick = () => advDiv.classList.toggle('show');
             div.querySelector('.remove-item').onclick = () => div.remove();
+            div.querySelector('.reward-rate').oninput = function() { this.parentNode.querySelector('.reward-rate-val').textContent = this.value + '%'; };
+            div.querySelector('.reward-volume').oninput = function() { this.parentNode.querySelector('.reward-vol-val').textContent = this.value + '%'; };
+            div.querySelector('.reward-pitch').oninput = function() { this.parentNode.querySelector('.reward-pitch-val').textContent = this.value + 'Hz'; };
             container.appendChild(div);
         }
     }
@@ -688,6 +691,9 @@
         const advDiv = div.querySelector('.advanced-settings');
         advBtn.onclick = () => advDiv.classList.toggle('show');
         div.querySelector('.remove-item').onclick = () => div.remove();
+        div.querySelector('.reward-rate').oninput = function() { this.parentNode.querySelector('.reward-rate-val').textContent = this.value + '%'; };
+        div.querySelector('.reward-volume').oninput = function() { this.parentNode.querySelector('.reward-vol-val').textContent = this.value + '%'; };
+        div.querySelector('.reward-pitch').oninput = function() { this.parentNode.querySelector('.reward-pitch-val').textContent = this.value + 'Hz'; };
         container.appendChild(div);
     }
 
@@ -956,6 +962,9 @@
         const advDiv = div.querySelector('.advanced-settings');
         advBtn.onclick = () => advDiv.classList.toggle('show');
         div.querySelector('.remove-item').onclick = () => div.remove();
+        div.querySelector('.adv-rate').oninput = function() { this.parentNode.querySelector('.adv-rate-val').textContent = this.value + '%'; };
+        div.querySelector('.adv-volume').oninput = function() { this.parentNode.querySelector('.adv-vol-val').textContent = this.value + '%'; };
+        div.querySelector('.adv-pitch').oninput = function() { this.parentNode.querySelector('.adv-pitch-val').textContent = this.value + 'Hz'; };
         container.appendChild(div);
     });
 
