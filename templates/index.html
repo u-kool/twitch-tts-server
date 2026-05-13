@@ -430,6 +430,14 @@
                 enqueueStream({ text: data.text, voice: data.voice, rate: data.rate, volume: data.volume, pitch: data.pitch });
             } catch(ex) {}
         });
+        sseSource.addEventListener('new_emote', e => {
+            try {
+                const data = JSON.parse(e.data);
+                if (data.name && data.url) {
+                    emoteMap[data.name] = data.url;
+                }
+            } catch(ex) {}
+        });
         sseSource.onerror = () => { sseSource.close(); setTimeout(connectSSE, 3000); };
         sseSource.onopen = () => addSystemMessage('🔊 SSE подключен');
     }

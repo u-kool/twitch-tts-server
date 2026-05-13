@@ -588,6 +588,22 @@ def handle_message(event: dict):
         text = event.get("text", "").strip()
         user = event.get("user", "Аноним")
         log_to_queue("chat", text, user)
+
+        # Динамически добавляем неизвестные emote_id в emoteMap
+        global emoteMap
+        emote_positions = event.get("emote_positions", {})
+        for eid, positions in emote_positions.items():
+            if not eid:
+                continue
+            name = None
+            for start, end in positions:
+                if 0 <= start < end <= len(text):
+                    name = text[start:end+1]
+                    break
+            if name and name not in emoteMap:
+                url = f"https://static-cdn.jtvnw.net/emoticons/v2/{eid}/default/dark/1.0"
+                emoteMap[name] = url
+                broadcast_sse({"event": "new_emote", "name": name, "url": url})
         allowed, processed_text, tts_params = should_tts_message(event)
         if not allowed:
             return
@@ -871,6 +887,19 @@ def api_emotes():
                     emotes[e["name"]] = f"https://static-cdn.jtvnw.net/emoticons/v2/{e['id']}/default/dark/1.0"
         except Exception as e:
             logger.warning(f"Twitch channel emotes: {e}")
+
+        # Twitch emote sets (from IRC JOIN — subscriber emotes of other channels)
+        if twitch_bot and twitch_bot.emote_sets:
+            for es_id in twitch_bot.emote_sets:
+                if es_id in ('0', ''):
+                    continue
+                try:
+                    r = fetch_with_retry(f"https://api.twitch.tv/helix/chat/emotes?emote_set_id={es_id}", headers=headers)
+                    if r.status_code == 200:
+                        for e in r.json().get("data", []):
+                            emotes[e["name"]] = f"https://static-cdn.jtvnw.net/emoticons/v2/{e['id']}/default/dark/1.0"
+                except Exception as e:
+                    logger.warning(f"Twitch emote set {es_id}: {e}")
 
         # BTTV global
         try:

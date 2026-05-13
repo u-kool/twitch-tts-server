@@ -21,6 +21,7 @@ class TwitchIRCBot:
         self.thread = None
         self._connected = False
         self._connect_event = threading.Event()
+        self.emote_sets = []
 
     def start(self):
         if self.running:
@@ -105,16 +106,9 @@ class TwitchIRCBot:
                 pass
             return
 
-        # Обработка успешного присоединения к каналу
-        if f"JOIN {self.channel}" in line and f":{self.nick}!{self.nick}@{self.nick}.tmi.twitch.tv" in line:
-            if not self._connected:
-                self._connected = True
-                self._connect_event.set()
-                logger.info(f"IRC bot successfully joined {self.channel}")
-            return
-
-        # Парсинг тегов
+        # Парсинг тегов (всегда, чтобы получить tags из JOIN и PRIVMSG)
         tags = {}
+        raw_line = line
         if line.startswith('@'):
             parts = line.split(' ', 1)
             tag_part = parts[0][1:]
@@ -125,6 +119,19 @@ class TwitchIRCBot:
                 else:
                     tags[tag] = None
             line = parts[1] if len(parts) > 1 else ''
+
+        # Обработка успешного присоединения к каналу
+        if f"JOIN {self.channel}" in raw_line and f":{self.nick}!{self.nick}@{self.nick}.tmi.twitch.tv" in raw_line:
+            if not self._connected:
+                self._connected = True
+                self._connect_event.set()
+                es = tags.get('emote-sets', '')
+                if es:
+                    self.emote_sets = es.split(',')
+                    logger.info(f"IRC bot joined {self.channel}, emote sets: {self.emote_sets}")
+                else:
+                    logger.info(f"IRC bot successfully joined {self.channel}")
+            return
 
         match = re.match(r":(\w+)!\1@\1\.tmi\.twitch\.tv PRIVMSG #\w+ :(.*)", line)
         if match:
@@ -143,6 +150,29 @@ class TwitchIRCBot:
             is_reply = reply_parent_msg_id is not None
             reply_to_user = tags.get('reply-parent-user-login', '')
 
+            # Парсинг emote_ids из тега emotes (например "25:0-4,12-16/1902:6-10")
+            emotes_tag = tags.get('emotes', '')
+            emote_ids = []
+            emote_positions = {}  # emote_id -> [(start, end), ...]
+            if emotes_tag:
+                for part in emotes_tag.split('/'):
+                    if ':' not in part:
+                        continue
+                    eid, positions_str = part.split(':', 1)
+                    if not eid or not eid.isdigit():
+                        continue
+                    emote_ids.append(eid)
+                    positions = []
+                    for pos in positions_str.split(','):
+                        if '-' in pos:
+                            try:
+                                s, e = pos.split('-', 1)
+                                positions.append((int(s), int(e)))
+                            except ValueError:
+                                pass
+                    if positions:
+                        emote_positions[eid] = positions
+
             if self.tts_callback:
                 self.tts_callback({
                     "type": "chat",
@@ -155,5 +185,7 @@ class TwitchIRCBot:
                     "is_broadcaster": is_broadcaster,
                     "is_highlighted": is_highlighted,
                     "is_reply": is_reply,
-                    "reply_to_user": reply_to_user
+                    "reply_to_user": reply_to_user,
+                    "emote_ids": emote_ids,
+                    "emote_positions": emote_positions
                 })
