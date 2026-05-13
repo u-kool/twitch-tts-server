@@ -198,7 +198,8 @@
                     </div>
                 </div>
                 <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="filter-links-checkbox"> 🔗 Игнорировать ссылки</label></div>
-                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="filter-emotes-checkbox"> 😀 Игнорировать смайлики</label></div>
+                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="filter-emotes-checkbox"> 😀 Игнорировать смайлики (BTTV/7TV/FFZ)</label></div>
+                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="filter-emoji-checkbox"> 😶 Игнорировать эмодзи (😋)</label></div>
                 <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="use-keywords-checkbox"> 🔑 Использовать ключевые слова</label>
                     <div id="keywords-settings" style="display: none; margin-top: 10px;">
                         <input type="text" id="keywords-input" class="settings-input" placeholder="ключевые слова через запятую">
@@ -441,7 +442,7 @@
             } catch(ex) {}
         });
         sseSource.onerror = () => { sseSource.close(); setTimeout(connectSSE, 3000); };
-        sseSource.onopen = () => addSystemMessage('🔊 SSE подключен');
+        sseSource.onopen = () => {};
     }
 
     // ---------------------- Эмоуты ----------------------
@@ -810,6 +811,7 @@
             document.getElementById('filter-moderator-checkbox').checked = d.role_filters?.moderator === true;
             document.getElementById('filter-links-checkbox').checked = d.filter_links !== false;
             document.getElementById('filter-emotes-checkbox').checked = d.filter_emotes === true;
+            document.getElementById('filter-emoji-checkbox').checked = d.filter_emoji !== false;
             document.getElementById('use-keywords-checkbox').checked = d.use_keywords === true;
             document.getElementById('keywords-input').value = (d.keywords || []).join(', ');
             document.getElementById('strip-keywords-checkbox').checked = d.strip_keywords_from_tts === true;
@@ -884,6 +886,7 @@
             },
             filter_links: document.getElementById('filter-links-checkbox').checked,
             filter_emotes: document.getElementById('filter-emotes-checkbox').checked,
+            filter_emoji: document.getElementById('filter-emoji-checkbox').checked,
             use_keywords: document.getElementById('use-keywords-checkbox').checked,
             keywords: document.getElementById('keywords-input').value.split(',').map(s=>s.trim()).filter(s=>s),
             strip_keywords_from_tts: document.getElementById('strip-keywords-checkbox').checked,

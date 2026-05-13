@@ -88,6 +88,7 @@ DEFAULT_CONFIG = {
     },
     "filter_links": True,
     "filter_emotes": False,
+    "filter_emoji": True,
     "use_keywords": False,
     "keywords": ["!tts"],
     "strip_keywords_from_tts": True,
@@ -417,6 +418,8 @@ def should_tts_message(event: dict) -> (bool, str, dict):
             if clean_w not in emoteMap:
                 new_words.append(w)
         text = ' '.join(new_words)
+    if config.get("filter_emoji", True):
+        text = re.sub(r'[\U0001F600-\U0001F64F\U0001F300-\U0001F5FF\U0001F680-\U0001F6FF\U0001F1E0-\U0001F1FF\U00002600-\U000026FF\U00002700-\U000027BF\U0001F900-\U0001F9FF\U0001FA00-\U0001FA6F\U0001FA70-\U0001FAFF\U0000FE00-\U0000FE0F\U0000200D\U0001F3FB-\U0001F3FF]', '', text).strip()
     ignore_chars = config.get("ignore_chars", "")
     if ignore_chars:
         for ch in ignore_chars:
@@ -833,7 +836,7 @@ def get_config():
     safe_keys = [
         "voice", "rate", "volume", "pitch", "event_cooldown", "min_length", "max_length",
         "user_cooldown", "filter_broadcaster", "save_audio", "tts_enabled", "read_all_messages",
-        "read_only_answered", "role_filters", "filter_links", "filter_emotes", "use_keywords",
+        "read_only_answered",         "role_filters", "filter_links", "filter_emotes", "filter_emoji", "use_keywords",
         "keywords", "strip_keywords_from_tts", "ignore_chars", "blacklist_users", "whitelist_users",
         "user_voice_map", "text_replacements", "events"
     ]
