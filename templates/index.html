@@ -221,6 +221,7 @@
     let currentConfig = {};
     let logsUpdateInterval = null, statusUpdateInterval = null;
     let sseSource = null;
+    let sseConnected = false;
     let emoteMap = {};
     let emotesLoaded = false;
     let saveAudioMode = true;
@@ -442,7 +443,10 @@
             } catch(ex) {}
         });
         sseSource.onerror = () => { sseSource.close(); setTimeout(connectSSE, 3000); };
-        sseSource.onopen = () => {};
+        sseSource.onopen = () => {
+            if (sseConnected) { location.reload(); }
+            sseConnected = true;
+        };
     }
 
     // ---------------------- Эмоуты ----------------------
