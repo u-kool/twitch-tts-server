@@ -87,7 +87,7 @@ DEFAULT_CONFIG = {
         "moderator": True
     },
     "filter_links": True,
-    "filter_emotes": False,
+    "filter_emotes": True,
     "filter_emoji": True,
     "use_keywords": False,
     "keywords": ["!tts"],
@@ -969,7 +969,7 @@ def api_emotes():
 
         # BTTV global
         try:
-            r = fetch_with_retry("https://api.betterttv.net/3/cached/emotes/global")
+            r = fetch_with_retry("https://api.betterttv.net/3/cached/emotes/global", timeout=15, max_retries=2)
             if r.status_code == 200:
                 for e in r.json():
                     emotes[e["code"]] = f"https://cdn.betterttv.net/emote/{e['id']}/1x"
@@ -979,7 +979,7 @@ def api_emotes():
         # BTTV channel
         if login:
             try:
-                r = fetch_with_retry(f"https://api.betterttv.net/3/cached/users/twitch/{user_id}")
+                r = fetch_with_retry(f"https://api.betterttv.net/3/cached/users/twitch/{user_id}", timeout=15, max_retries=2)
                 if r.status_code == 200:
                     bttv_data = r.json()
                     for e in bttv_data.get("channelEmotes", []):
@@ -991,7 +991,7 @@ def api_emotes():
 
         # 7TV global
         try:
-            r = fetch_with_retry("https://7tv.io/v3/emote-sets/global", timeout=15, max_retries=2)
+            r = fetch_with_retry("https://7tv.io/v3/emote-sets/global", timeout=25, max_retries=3)
             if r.status_code == 200:
                 data = r.json()
                 for e in data.get("emotes", []):
@@ -1009,7 +1009,7 @@ def api_emotes():
         # 7TV channel
         if login:
             try:
-                r = fetch_with_retry(f"https://7tv.io/v3/users/twitch/{user_id}", timeout=15, max_retries=2)
+                r = fetch_with_retry(f"https://7tv.io/v3/users/twitch/{user_id}", timeout=25, max_retries=3)
                 if r.status_code == 200:
                     user_data = r.json()
                     for e in user_data.get("emote_set", {}).get("emotes", []):
@@ -1026,7 +1026,7 @@ def api_emotes():
 
         # FFZ global
         try:
-            r = fetch_with_retry("https://api.frankerfacez.com/v1/emotes", timeout=15, max_retries=2)
+            r = fetch_with_retry("https://api.frankerfacez.com/v1/emotes", timeout=25, max_retries=3)
             if r.status_code == 200:
                 data = r.json()
                 for set_id, set_data in data.get("sets", {}).items():
@@ -1041,7 +1041,7 @@ def api_emotes():
         # FFZ channel
         if login:
             try:
-                r = fetch_with_retry(f"https://api.frankerfacez.com/v1/room/{login}", timeout=15, max_retries=2)
+                r = fetch_with_retry(f"https://api.frankerfacez.com/v1/room/{login}", timeout=25, max_retries=3)
                 if r.status_code == 200:
                     data = r.json()
                     for set_id, set_data in data.get("sets", {}).items():
