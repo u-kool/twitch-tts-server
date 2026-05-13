@@ -121,11 +121,18 @@ class TwitchIRCBot:
             line = parts[1] if len(parts) > 1 else ''
 
         # GLOBALUSERSTATE / USERSTATE — содержит emote-sets (все наборы смайлов юзера)
-        if 'GLOBALUSERSTATE' in raw_line or 'USERSTATE' in raw_line:
+        if 'GLOBALUSERSTATE' in raw_line:
+            es = tags.get('emote-sets', '')
+            logger.info(f"GLOBALUSERSTATE tags: emote-sets='{es}', all tags keys={list(tags.keys())}")
+            if es:
+                self.emote_sets = [s for s in es.split(',') if s and s != '0']
+                logger.info(f"Got emote sets from GLOBALUSERSTATE: {self.emote_sets}")
+            return
+        if 'USERSTATE' in raw_line:
             es = tags.get('emote-sets', '')
             if es:
-                self.emote_sets = es.split(',')
-                logger.info(f"Got emote sets from {'GLOBALUSERSTATE' if 'GLOBALUSERSTATE' in raw_line else 'USERSTATE'}: {self.emote_sets}")
+                self.emote_sets = [s for s in es.split(',') if s and s != '0']
+                logger.info(f"Got emote sets from USERSTATE: {self.emote_sets}")
             return
 
         # Обработка успешного присоединения к каналу
