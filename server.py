@@ -1201,7 +1201,7 @@ if __name__ == "__main__":
         app.run(
             host=config["host"],
             port=config["port"],
-            debug=False,
+            debug=True,
             threaded=True
         )
     except KeyboardInterrupt:
