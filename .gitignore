@@ -1,0 +1,30 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+myenv_314/
+python/
+
+# Config with secrets
+config.json
+
+# Logs
+*.log
+
+# Generated audio
+outputs/
+voices/
+
+# Placeholder/empty
+python
+
+# Windows shortcuts
+*.lnk
+
+# OS
+Thumbs.db
+.DS_Store
+
+# IDE
+.vscode/
+.idea/

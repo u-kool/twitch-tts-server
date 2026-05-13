@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🎙️ Twitch TTS</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.10.0/font/bootstrap-icons.css">
+    <style>
+        * { margin:0; padding:0; box-sizing:border-box; }
+        body { background:#0e0e0e; color:#efeff1; font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif; height:100vh; overflow:hidden; }
+        .app-container { display:flex; height:100vh; width:100%; position:relative; }
+        .chat-area { flex:8; display:flex; flex-direction:column; background:#0e0e0e; transition:flex 0.3s; }
+        .chat-header { padding:12px 20px; background:#18181b; border-bottom:1px solid #2a2a2d; display:flex; align-items:center; justify-content:space-between; flex-shrink:0; }
+        .streamer-info { display:flex; align-items:center; gap:8px; }
+        .streamer-avatar { width:32px; height:32px; border-radius:50%; background:#9146FF; display:flex; align-items:center; justify-content:center; font-size:14px; font-weight:bold; }
+        .streamer-name { font-size:15px; font-weight:600; }
+        .status-badge { display:flex; align-items:center; gap:6px; font-size:12px; color:#adadb8; }
+        .status-dot { width:8px; height:8px; border-radius:50%; background:#53535f; }
+        .status-dot.online { background:#28a745; box-shadow:0 0 5px #28a745; }
+        .action-buttons { display:flex; gap:8px; }
+        .action-btn { background:#2a2a2d; border:none; color:#efeff1; padding:6px 12px; border-radius:20px; font-size:13px; font-weight:500; display:flex; align-items:center; gap:6px; transition:all 0.2s; }
+        .action-btn:hover { background:#3a3a3d; }
+        .log-container { flex:1; overflow-y:auto; padding:16px 20px; display:flex; flex-direction:column; gap:4px; }
+        .log-entry { padding:6px 0; font-size:14px; line-height:1.4; word-wrap:break-word; display:flex; align-items:baseline; gap:8px; transition:opacity 0.3s; }
+        .log-entry.chat { color:#efeff1; }
+        .log-entry.event { color:#ffd700; background:rgba(255,215,0,0.08); padding:6px 10px; margin:2px 0; border-radius:8px; font-size:13px; }
+        .log-entry.system { color:#adadb8; font-style:italic; font-size:12px; }
+        .log-entry.error { color:#ff6b6b; }
+        .log-time { color:#5a5a66; font-size:11px; flex-shrink:0; }
+        .log-user { font-weight:600; color:#b8b8c9; flex-shrink:0; }
+        .log-user.chat { color:#b8b8c9; }
+        .log-user.event { color:#ffd700; }
+        .log-text { word-break:break-word; }
+        .log-text img { vertical-align:middle; max-height:1.4em; margin:0 1px; }
+        .empty-chat { text-align:center; color:#5a5a66; padding:40px; font-size:14px; }
+        .emotes-loading { text-align:center; color:#ffd700; padding:8px; font-size:12px; }
+        .settings-panel { position:fixed; top:0; right:-500px; width:500px; height:100vh; background:#18181b; border-left:1px solid #2a2a2d; transition:right 0.3s; z-index:1000; display:flex; flex-direction:column; box-shadow:-5px 0 20px rgba(0,0,0,0.5); }
+        .settings-panel.open { right:0; }
+        .settings-header { padding:12px 20px; border-bottom:1px solid #2a2a2d; display:flex; justify-content:space-between; align-items:center; }
+        .settings-header h5 { margin:0; font-size:18px; display:flex; align-items:center; gap:12px; }
+        .header-actions { display:flex; gap:12px; align-items:center; }
+        .header-btn { background:none; border:none; color:#adadb8; font-size:20px; cursor:pointer; padding:4px 8px; border-radius:6px; transition:all 0.2s; }
+        .header-btn:hover { background:#2a2a2d; color:#efeff1; }
+        .close-settings { background:none; border:none; color:#adadb8; font-size:24px; cursor:pointer; line-height:1; padding:4px 8px; }
+        .close-settings:hover { color:#efeff1; }
+        .settings-body { flex:1; overflow-y:auto; padding:20px; }
+        .settings-group { margin-bottom:20px; }
+        .settings-group label { font-size:13px; color:#adadb8; margin-bottom:8px; display:block; }
+        .settings-select, .settings-input { width:100%; background:#2a2a2d; border:1px solid #3a3a3d; color:#efeff1; padding:8px 12px; border-radius:8px; font-size:14px; }
+        .voice-row { display:flex; gap:12px; align-items:center; margin-bottom:12px; }
+        .voice-row select { flex:1; }
+        .voice-row .voice-label { font-size:14px; font-weight:500; color:#efeff1; min-width:50px; }
+        .slider-row { display: flex; align-items: center; gap: 12px; margin-bottom: 15px; width: 100%; }
+        .slider-row label { min-width: 45px; margin-bottom: 0 !important; font-size: 14px; font-weight: 500; }
+        .slider-row .slider-value { min-width: 110px; text-align: left; margin-top: 0; font-size: 12px; color: #adadb8; }
+        .slider-row input[type="range"] { flex: 1; min-width: 120px; max-width: 100%; }
+        input[type="range"] { width:100%; background:#3a3a3d; height:4px; border-radius:2px; -webkit-appearance:none; }
+        input[type="range"]::-webkit-slider-thumb { -webkit-appearance:none; width:14px; height:14px; border-radius:50%; background:#9146FF; cursor:pointer; }
+        .checkbox-label { display:flex; align-items:center; gap:10px; cursor:pointer; }
+        .settings-overlay { position:fixed; top:0; left:0; width:100%; height:100%; background:rgba(0,0,0,0.5); opacity:0; visibility:hidden; transition:all 0.3s; z-index:999; }
+        .settings-overlay.active { opacity:1; visibility:visible; }
+        .dynamic-list-item, .dynamic-list { background:#2a2a2d; padding:8px; border-radius:6px; margin-bottom:8px; display:flex; gap:8px; align-items:center; flex-wrap:wrap; }
+        .dynamic-list-item input, .dynamic-list-item select { flex:1; background:#1e1e21; border:1px solid #3a3a3d; color:white; padding:6px; border-radius:4px; }
+        .dynamic-list-item button { background:#53535f; border:none; color:white; padding:4px 8px; border-radius:4px; cursor:pointer; }
+        .advanced-settings { background:#1e1e21; border-radius:8px; padding:8px; margin-top:8px; display:none; border-left:2px solid #9146FF; }
+        .advanced-settings.show { display:block; }
+        .modal-content { background:#18181b; color:#efeff1; }
+        .modal-header { border-bottom-color:#2a2a2d; }
+        .modal-footer { border-top-color:#2a2a2d; }
+        .switch { position: relative; display: inline-block; width: 50px; height: 24px; margin-right: 8px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #53535f; transition: 0.3s; border-radius: 24px; }
+        .slider:before { position: absolute; content: ""; height: 18px; width: 18px; left: 3px; bottom: 3px; background-color: white; transition: 0.3s; border-radius: 50%; }
+        input:checked + .slider { background-color: #9146FF; }
+        input:checked + .slider:before { transform: translateX(26px); }
+        .toggle-label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
+        .advanced-dropdown { background: #2a2a2d; border-radius: 12px; margin-top: 12px; padding: 15px; display: none; border: 1px solid #3a3a3d; }
+        .advanced-dropdown.show { display: block; }
+        .advanced-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 15px; padding-bottom: 8px; border-bottom: 1px solid #3a3a3d; }
+        .advanced-header span { font-weight: 600; color: #9146FF; }
+        .advanced-close { background: none; border: none; color: #adadb8; font-size: 18px; cursor: pointer; padding: 0 4px; }
+        .event-block { border:1px solid #3a3a3d; border-radius:8px; padding:12px; margin-bottom:15px; background:#1e1e21; }
+        .event-header { display:flex; flex-wrap:wrap; align-items:center; gap:12px; margin-bottom:10px; }
+        .event-header label { margin:0; cursor:pointer; }
+        .event-voice-select { flex:2; min-width:150px; background:#2a2a2d; color:white; border:1px solid #3a3a3d; padding:6px 10px; border-radius:6px; }
+        @media (max-width:768px) { .settings-panel { width:100%; right:-100%; } .chat-area { flex:1; } .action-btn span { display:none; } }
+    </style>
+</head>
+<body>
+<div class="app-container">
+    <div class="chat-area">
+        <div class="chat-header">
+            <div class="streamer-info">
+                <div class="streamer-avatar">🎙️</div>
+                <div class="streamer-name" id="streamer-name">Twitch TTS</div>
+                <div class="status-badge">
+                    <span class="status-dot" id="status-dot"></span>
+                    <span id="status-text">Offline</span>
+                </div>
+            </div>
+            <div class="action-buttons">
+                <button id="open-voice-map-btn" class="action-btn"><i class="bi bi-mic"></i> <span>Голоса</span></button>
+                <button id="open-events-btn" class="action-btn"><i class="bi bi-calendar-event"></i> <span>События</span></button>
+                <button id="open-settings-btn" class="action-btn"><i class="bi bi-gear"></i> <span>Настройки</span></button>
+            </div>
+        </div>
+        <div id="log-container" class="log-container">
+            <div class="empty-chat">💬 Сообщения чата появятся здесь...</div>
+        </div>
+        <div id="emotes-status" class="emotes-loading" style="display:none;">😊 Загрузка смайлов...</div>
+    </div>
+
+    <!-- Modal: сопоставление автора с голосом -->
+    <div class="modal fade" id="voiceMapModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered modal-lg">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-mic"></i> Сопоставление автора с голосом + настройки</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body">
+                    <div id="user-voice-list-modal"></div>
+                    <button type="button" id="add-user-voice-modal-btn" class="action-btn" style="width:100%; margin-top:10px;">+ Добавить пользователя</button>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                    <button type="button" id="save-voice-map-btn" class="btn btn-primary">Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Modal: настройка событий -->
+    <div class="modal fade" id="eventsModal" tabindex="-1" data-bs-backdrop="static">
+        <div class="modal-dialog modal-dialog-centered modal-xl">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title"><i class="bi bi-calendar-event"></i> Настройка событий</h5>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"></button>
+                </div>
+                <div class="modal-body" id="events-modal-body"></div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Закрыть</button>
+                    <button type="button" id="save-events-btn" class="btn btn-primary">Сохранить</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Панель основных настроек -->
+    <div id="settings-overlay" class="settings-overlay"></div>
+    <div id="settings-panel" class="settings-panel">
+        <div class="settings-header">
+            <h5>
+                <i class="bi bi-gear-fill"></i> Настройки TTS
+                <label class="toggle-label">
+                    <span class="switch">
+                        <input type="checkbox" id="tts-enabled-toggle">
+                        <span class="slider"></span>
+                    </span>
+                    🔊
+                </label>
+            </h5>
+            <div class="header-actions">
+                <button id="header-save-btn" class="header-btn" title="Сохранить настройки">💾</button>
+                <button id="header-test-btn" class="header-btn" title="Тест голоса">🔊</button>
+                <button id="close-settings-btn" class="close-settings" title="Закрыть">&times;</button>
+            </div>
+        </div>
+        <div class="settings-body">
+            <div class="voice-row">
+                <span class="voice-label">🎤 Голос по умолчанию:</span>
+                <select id="voice-select" class="settings-select"><option>Загрузка...</option></select>
+                <button id="toggle-advanced-btn" class="action-btn" title="Расширенные настройки">⚙️</button>
+            </div>
+            <div id="advanced-dropdown" class="advanced-dropdown">
+                <div class="advanced-header"><span>⚙️ Расширенные настройки TTS</span><button id="close-advanced-btn" class="advanced-close">✕</button></div>
+                <div class="slider-row"><label>⚡ Скорость</label><span class="slider-value" id="rate-value">Нормальная (+0%)</span><input type="range" id="rate-slider" min="-50" max="100" value="0"></div>
+                <div class="slider-row"><label>🔊 Громкость (усиление)</label><span class="slider-value" id="volume-value">Нормально (+0%)</span><input type="range" id="volume-slider" min="-50" max="50" value="0"></div>
+                <div class="slider-row"><label>🎵 Тон</label><span class="slider-value" id="pitch-value">Нормальный (+0Hz)</span><input type="range" id="pitch-slider" min="-100" max="100" value="0"></div>
+                <div class="settings-group"><label>📏 Ограничение длины текста (мин/макс)</label><input type="number" id="min-length-input" class="settings-input" min="1" value="3" style="width:48%; display:inline-block;"> <input type="number" id="max-length-input" class="settings-input" min="1" value="200" style="width:48%; display:inline-block;"></div>
+                <div class="settings-group"><label>⏱️ Кулдаун событий (сек)</label><input type="number" id="event-cooldown-input" class="settings-input" min="0" value="5"></div>
+                <div class="settings-group"><label>⏱️ Кулдаун пользователя (сек)</label><input type="number" id="user-cooldown-input" class="settings-input" min="0" value="10"></div>
+                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="filter-broadcaster-checkbox"> 🚫 Фильтровать сообщения стримера</label></div>
+                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="save-audio-checkbox"> 💾 Сохранять аудиофайлы (повышает нагрузку на диск)</label></div>
+            </div>
+            <hr>
+            <div class="settings-group">
+                <label class="checkbox-label"><input type="checkbox" id="read-all-messages-checkbox"> 📢 Озвучивать все сообщения</label>
+            </div>
+            <div id="advanced-filters" style="display: none;">
+                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="read-only-answered-checkbox"> 💬 Озвучивать сообщения только с ответом</label></div>
+                <div class="settings-group"><label>👥 Роли (озвучивать, если не все сообщения)</label>
+                    <div><label class="checkbox-label"><input type="checkbox" id="filter-highlighted-checkbox"> Выделенные сообщения</label></div>
+                    <div><label class="checkbox-label"><input type="checkbox" id="filter-sub-checkbox"> Подписчики</label></div>
+                    <div><label class="checkbox-label"><input type="checkbox" id="filter-vip-checkbox"> VIP</label></div>
+                    <div><label class="checkbox-label"><input type="checkbox" id="filter-moderator-checkbox"> Модераторы</label></div>
+                </div>
+                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="filter-links-checkbox"> 🔗 Игнорировать ссылки</label></div>
+                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="filter-emotes-checkbox"> 😀 Игнорировать смайлики</label></div>
+                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="use-keywords-checkbox"> 🔑 Использовать ключевые слова</label>
+                    <div id="keywords-settings" style="display: none; margin-top: 10px;">
+                        <input type="text" id="keywords-input" class="settings-input" placeholder="ключевые слова через запятую">
+                        <label class="checkbox-label"><input type="checkbox" id="strip-keywords-checkbox"> Удалять ключевые слова из озвучивания</label>
+                    </div>
+                </div>
+                <div class="settings-group"><label>🚫 Игнорировать символы</label><input type="text" id="ignore-chars-input" class="settings-input" placeholder="@ #"></div>
+            </div>
+            <div class="settings-group"><label>📝 Чёрный список (пользователи, которых не озвучивать)</label><textarea id="blacklist-input" class="settings-input" rows="2"></textarea>
+            <label>📝 Белый список (озвучивать всегда)</label><textarea id="whitelist-input" class="settings-input" rows="2"></textarea></div>
+            <div class="settings-group"><label>🔄 Замена текста (старое → новое)</label><div id="text-replacements-list"></div><button type="button" id="add-replacement-btn" class="action-btn" style="margin-top:5px; width:100%;">+ Добавить замену</button></div>
+        </div>
+    </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+<script>
+    // ---------------------- Глобальные переменные ----------------------
+    let currentConfig = {};
+    let logsUpdateInterval = null, statusUpdateInterval = null;
+    let sseSource = null;
+    let emoteMap = {};
+    let emotesLoaded = false;
+    let saveAudioMode = true;
+
+    let audioQueue = [], isPlaying = false, currentAudio = null;
+    let usernamesSet = new Set();
+    const USERNAMES_STORAGE_KEY = 'twitch_tts_usernames';
+    let rewardsSet = new Set();          // кеш названий наград
+    const REWARDS_STORAGE_KEY = 'twitch_tts_rewards';
+
+    let availableVoices = [];
+    let userVoiceMap = {};
+    let eventsConfig = {};
+
+    // DOM элементы
+    const openSettingsBtn = document.getElementById('open-settings-btn');
+    const openVoiceMapBtn = document.getElementById('open-voice-map-btn');
+    const openEventsBtn = document.getElementById('open-events-btn');
+    const closeSettingsBtn = document.getElementById('close-settings-btn');
+    const settingsPanel = document.getElementById('settings-panel');
+    const settingsOverlay = document.getElementById('settings-overlay');
+    const logContainer = document.getElementById('log-container');
+    const streamerNameSpan = document.getElementById('streamer-name');
+    const statusDot = document.getElementById('status-dot');
+    const statusTextSpan = document.getElementById('status-text');
+    const emotesStatus = document.getElementById('emotes-status');
+    const headerSaveBtn = document.getElementById('header-save-btn');
+    const headerTestBtn = document.getElementById('header-test-btn');
+    const ttsEnabledToggle = document.getElementById('tts-enabled-toggle');
+    const toggleAdvancedBtn = document.getElementById('toggle-advanced-btn');
+    const closeAdvancedBtn = document.getElementById('close-advanced-btn');
+    const advancedDropdown = document.getElementById('advanced-dropdown');
+
+    let voiceMapModal, eventsModal;
+
+    // ---------------------- Вспомогательные функции ----------------------
+    function escapeHtml(str) {
+        if (!str) return '';
+        return str.replace(/[&<>]/g, function(m) {
+            if (m === '&') return '&amp;';
+            if (m === '<') return '&lt;';
+            if (m === '>') return '&gt;';
+            return m;
+        });
+    }
+
+    function escapeRegex(str) {
+        return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    }
+
+    function parseEmotes(message) {
+        if (!message || Object.keys(emoteMap).length === 0) return escapeHtml(message);
+        let result = escapeHtml(message);
+        for (const [emote, url] of Object.entries(emoteMap)) {
+            const re = new RegExp(`\\b${escapeRegex(emote)}\\b`, 'g');
+            result = result.replace(re, `<img src="${url}" alt="${emote}" style="height:1.4em;">`);
+        }
+        return result;
+    }
+
+    function addSystemMessage(text) {
+        const div = document.createElement('div');
+        div.className = 'log-entry system';
+        div.innerHTML = `<span class="log-time">${new Date().toLocaleTimeString()}</span><span class="log-text">${escapeHtml(text)}</span>`;
+        const empty = logContainer.querySelector('.empty-chat');
+        if (empty) empty.remove();
+        logContainer.appendChild(div);
+        logContainer.scrollTop = logContainer.scrollHeight;
+        setTimeout(() => { if (div.parentNode) div.remove(); }, 5000);
+    }
+
+    // ---------------------- Кеш наград ----------------------
+    function loadRewardsCache() {
+        const stored = localStorage.getItem(REWARDS_STORAGE_KEY);
+        if (stored) try { rewardsSet = new Set(JSON.parse(stored)); } catch(e) {}
+    }
+    function saveRewardsCache() {
+        localStorage.setItem(REWARDS_STORAGE_KEY, JSON.stringify(Array.from(rewardsSet)));
+    }
+    function addRewardToCache(rewardName) {
+        if (rewardName && !rewardsSet.has(rewardName)) {
+            rewardsSet.add(rewardName);
+            saveRewardsCache();
+        }
+    }
+
+    // ---------------------- Статус и логи ----------------------
+    async function fetchStatus() {
+        try {
+            const resp = await fetch('/api/status');
+            const data = await resp.json();
+            if (data.twitch_running) {
+                statusDot.className = 'status-dot online';
+                statusTextSpan.textContent = 'Online';
+                streamerNameSpan.textContent = data.login || data.channel?.replace('#','') || 'Twitch';
+            } else {
+                statusDot.className = 'status-dot';
+                statusTextSpan.textContent = 'Offline';
+                streamerNameSpan.textContent = 'Twitch TTS';
+            }
+        } catch(e) { console.error('Status error:', e); }
+    }
+
+    function addLogToUI(log) {
+        if (log.type === 'system' && log.text.includes('Озвучено')) return;
+        const div = document.createElement('div');
+        div.className = `log-entry ${log.type}`;
+        const timeSpan = document.createElement('span');
+        timeSpan.className = 'log-time';
+        timeSpan.textContent = new Date(log.timestamp * 1000).toLocaleTimeString();
+        div.appendChild(timeSpan);
+        if (log.user) {
+            const userSpan = document.createElement('span');
+            userSpan.className = `log-user ${log.type}`;
+            userSpan.textContent = log.user + ':';
+            div.appendChild(userSpan);
+            addUsernameToCache(log.user);
+        }
+        const textSpan = document.createElement('span');
+        textSpan.className = 'log-text';
+        if (log.type === 'chat' && emotesLoaded && Object.keys(emoteMap).length) {
+            textSpan.innerHTML = parseEmotes(log.text);
+        } else {
+            textSpan.textContent = escapeHtml(log.text);
+        }
+        div.appendChild(textSpan);
+        
+        // Извлечение названия награды из лога события (для кеша)
+        if (log.type === 'event' && log.text) {
+            const match = log.text.match(/использовал награду (.+?)(?: и сказал|$)/);
+            if (match && match[1]) {
+                addRewardToCache(match[1].trim());
+            }
+        }
+        
+        const empty = logContainer.querySelector('.empty-chat');
+        if (empty) empty.remove();
+        logContainer.appendChild(div);
+        logContainer.scrollTop = logContainer.scrollHeight;
+        while (logContainer.children.length > 200) logContainer.firstChild.remove();
+    }
+
+    async function fetchLogs() {
+        try {
+            const resp = await fetch('/api/logs');
+            const logs = await resp.json();
+            logs.forEach(addLogToUI);
+        } catch(e) { console.error(e); }
+    }
+
+    // ---------------------- Аудио ----------------------
+    function playNext() {
+        if (audioQueue.length === 0) {
+            isPlaying = false;
+            currentAudio = null;
+            return;
+        }
+        isPlaying = true;
+        const item = audioQueue.shift();
+        const audio = new Audio();
+        currentAudio = audio;
+        if (item.filename) {
+            audio.src = `/api/latest?file=${encodeURIComponent(item.filename)}`;
+        } else if (item.streamUrl) {
+            audio.src = item.streamUrl;
+        } else {
+            playNext();
+            return;
+        }
+        audio.onended = () => playNext();
+        audio.onerror = () => playNext();
+        audio.play().catch(err => {
+            if (err.name === 'NotAllowedError') {
+                addSystemMessage('🔇 Нажмите любую кнопку для разблокировки звука');
+                isPlaying = false;
+                audioQueue.unshift(item);
+            } else {
+                playNext();
+            }
+        });
+    }
+
+    function enqueueAudio(filename) {
+        audioQueue.push({ filename });
+        if (!isPlaying) playNext();
+    }
+
+    function enqueueStream(params) {
+        const query = new URLSearchParams(params).toString();
+        audioQueue.push({ streamUrl: `/api/tts/stream?${query}` });
+        if (!isPlaying) playNext();
+    }
+
+    // ---------------------- SSE ----------------------
+    function connectSSE() {
+        if (sseSource) sseSource.close();
+        sseSource = new EventSource('/api/sse');
+        sseSource.addEventListener('new_audio', e => {
+            if (!saveAudioMode) return;
+            try {
+                const data = JSON.parse(e.data);
+                enqueueAudio(data.filename);
+            } catch(ex) {}
+        });
+        sseSource.addEventListener('play', e => {
+            try {
+                const data = JSON.parse(e.data);
+                enqueueStream({ text: data.text, voice: data.voice, rate: data.rate, volume: data.volume, pitch: data.pitch });
+            } catch(ex) {}
+        });
+        sseSource.onerror = () => { sseSource.close(); setTimeout(connectSSE, 3000); };
+        sseSource.onopen = () => addSystemMessage('🔊 SSE подключен');
+    }
+
+    // ---------------------- Эмоуты ----------------------
+    async function loadEmotes() {
+        emotesStatus.style.display = 'block';
+        try {
+            const resp = await fetch('/api/emotes');
+            if (resp.ok) {
+                emoteMap = await resp.json();
+                emotesLoaded = true;
+                emotesStatus.textContent = '😊 Смайлы загружены';
+                setTimeout(() => emotesStatus.style.display = 'none', 2000);
+            }
+        } catch(e) { emotesStatus.textContent = '⚠ Ошибка загрузки смайлов'; }
+    }
+
+    // ---------------------- Кэш имён ----------------------
+    function loadUsernameCache() {
+        const stored = localStorage.getItem(USERNAMES_STORAGE_KEY);
+        if (stored) try { usernamesSet = new Set(JSON.parse(stored)); } catch(e) {}
+    }
+    function saveUsernameCache() { localStorage.setItem(USERNAMES_STORAGE_KEY, JSON.stringify(Array.from(usernamesSet))); }
+    function addUsernameToCache(username) { if (username && !usernamesSet.has(username)) { usernamesSet.add(username); saveUsernameCache(); } }
+
+    // ---------------------- Голоса ----------------------
+    async function loadVoices() {
+        try {
+            const resp = await fetch('/api/voices');
+            availableVoices = await resp.json();
+            const select = document.getElementById('voice-select');
+            select.innerHTML = '';
+            availableVoices.forEach(v => {
+                const opt = document.createElement('option');
+                opt.value = v.name;
+                opt.textContent = `${v.name} (${v.gender}, ${v.locale})`;
+                select.appendChild(opt);
+            });
+            renderUserVoiceMapInModal(userVoiceMap);
+            renderEventsModal(eventsConfig);
+        } catch(e) { console.error(e); }
+    }
+
+    // ---------- Рендер окна голосов (без изменений) ----------
+    function renderUserVoiceMapInModal(map) {
+        const container = document.getElementById('user-voice-list-modal');
+        if (!container) return;
+        container.innerHTML = '';
+        const usernamesArray = Array.from(usernamesSet).sort();
+        for (const [user, cfg] of Object.entries(map)) {
+            const isObj = typeof cfg === 'object' && cfg !== null;
+            const voice = isObj ? cfg.voice : cfg;
+            const rate = isObj ? (cfg.rate || '+0%') : '+0%';
+            const volume = isObj ? (cfg.volume || '+0%') : '+0%';
+            const pitch = isObj ? (cfg.pitch || '+0Hz') : '+0Hz';
+            const div = document.createElement('div');
+            div.className = 'dynamic-list-item';
+            const datalistId = `datalist-${Date.now()}-${Math.random()}`;
+            div.innerHTML = `
+                <input type="text" placeholder="Имя пользователя" value="${escapeHtml(user)}" class="map-user" list="${datalistId}" style="flex:1;">
+                <datalist id="${datalistId}">${usernamesArray.map(u => `<option value="${escapeHtml(u)}">`).join('')}</datalist>
+                <select class="map-voice" style="flex:1;">
+                    ${availableVoices.map(v => `<option value="${escapeHtml(v.name)}" ${v.name === voice ? 'selected' : ''}>${escapeHtml(v.name)} (${v.gender}, ${v.locale})</option>`).join('')}
+                </select>
+                <button class="voice-advanced-btn" style="background:#9146FF;">⚙️</button>
+                <button class="remove-item">🗑️</button>
+                <div class="advanced-settings" style="width:100%; margin-top:8px;">
+                    <div class="slider-row"><label>⚡ Скорость</label><input type="range" class="adv-rate" min="-50" max="100" value="${parseInt(rate)}"><span class="adv-rate-val">${rate}</span></div>
+                    <div class="slider-row"><label>🔊 Громкость</label><input type="range" class="adv-volume" min="-50" max="50" value="${parseInt(volume)}"><span class="adv-vol-val">${volume}</span></div>
+                    <div class="slider-row"><label>🎵 Тон</label><input type="range" class="adv-pitch" min="-100" max="100" value="${parseInt(pitch)}"><span class="adv-pitch-val">${pitch}</span></div>
+                </div>
+            `;
+            const advBtn = div.querySelector('.voice-advanced-btn');
+            const advDiv = div.querySelector('.advanced-settings');
+            advBtn.onclick = () => advDiv.classList.toggle('show');
+            const rateSlider = div.querySelector('.adv-rate');
+            const rateSpan = div.querySelector('.adv-rate-val');
+            const volSlider = div.querySelector('.adv-volume');
+            const volSpan = div.querySelector('.adv-vol-val');
+            const pitchSlider = div.querySelector('.adv-pitch');
+            const pitchSpan = div.querySelector('.adv-pitch-val');
+            rateSlider.oninput = () => rateSpan.textContent = rateSlider.value + '%';
+            volSlider.oninput = () => volSpan.textContent = volSlider.value + '%';
+            pitchSlider.oninput = () => pitchSpan.textContent = pitchSlider.value + 'Hz';
+            div.querySelector('.remove-item').onclick = () => div.remove();
+            container.appendChild(div);
+        }
+    }
+
+    function getUserVoiceMapFromModal() {
+        const items = document.querySelectorAll('#user-voice-list-modal .dynamic-list-item');
+        const map = {};
+        items.forEach(item => {
+            const user = item.querySelector('.map-user').value.trim();
+            const voice = item.querySelector('.map-voice').value;
+            if (!user || !voice) return;
+            const adv = item.querySelector('.advanced-settings');
+            if (adv && adv.classList.contains('show')) {
+                const rate = item.querySelector('.adv-rate').value + '%';
+                const volume = item.querySelector('.adv-volume').value + '%';
+                const pitch = item.querySelector('.adv-pitch').value + 'Hz';
+                map[user] = { voice, rate, volume, pitch };
+            } else {
+                map[user] = voice;
+            }
+        });
+        return map;
+    }
+
+    // ---------- Рендер окна событий (с исправлениями для reward) ----------
+    function renderEventsModal(events) {
+        const container = document.getElementById('events-modal-body');
+        if (!container) return;
+        const eventTypes = ['follow', 'subscription', 'subscription_gift', 'cheer', 'raid', 'reward'];
+        let html = '';
+        for (const ev of eventTypes) {
+            const cfg = events[ev] || {};
+            const enabled = cfg.enabled !== false;
+            const voice = cfg.voice || currentConfig.voice;
+            let format = cfg.format || '';
+            const rate = cfg.rate || '+0%';
+            const volume = cfg.volume || '+0%';
+            const pitch = cfg.pitch || '+0Hz';
+            const minViewers = cfg.min_viewers || 0;
+            // Для reward используем format_no_msg и format_with_msg
+            const formatNoMsg = cfg.format_no_msg || '{UserName} использовал награду {RewardName}';
+            const formatWithMsg = cfg.format_with_msg || '{UserName} использовал награду {RewardName} и сказал {Message}';
+            
+            html += `<div class="event-block" data-event="${ev}">
+                <div class="event-header">
+                    <label class="checkbox-label"><input type="checkbox" class="event-enabled" ${enabled ? 'checked' : ''}> <strong>${ev.replace('_',' ').toUpperCase()}</strong></label>
+                    <select class="event-voice-select">${availableVoices.map(v => `<option value="${v.name}" ${(voice===v.name) ? 'selected' : ''}>${v.name} (${v.gender}, ${v.locale})</option>`).join('')}</select>
+                    <button class="action-btn event-advanced-toggle">⚙️</button>
+                </div>
+                <div class="event-advanced-settings" style="display:none; margin-top:10px;">
+                    <div class="slider-row"><label>⚡ Скорость</label><input type="range" class="event-rate" min="-50" max="100" value="${parseInt(rate)}"><span class="event-rate-val">${rate}</span></div>
+                    <div class="slider-row"><label>🔊 Громкость</label><input type="range" class="event-volume" min="-50" max="50" value="${parseInt(volume)}"><span class="event-vol-val">${volume}</span></div>
+                    <div class="slider-row"><label>🎵 Тон</label><input type="range" class="event-pitch" min="-100" max="100" value="${parseInt(pitch)}"><span class="event-pitch-val">${pitch}</span></div>
+                </div>`;
+            
+            // Для всех событий, кроме reward, добавляем общее поле формата
+            if (ev !== 'reward') {
+                html += `<div><input type="text" class="event-format" placeholder="Формат сообщения" value="${escapeHtml(format)}" style="width:100%; background:#2a2a2d; border:1px solid #3a3a3d; padding:6px; color:white; margin-top:5px;"></div>`;
+            } else {
+                // Для reward добавляем отдельные поля формата без сообщения и с сообщением, а также сопоставление наград
+                html += `<div style="margin-top:8px;">
+                            <label>Формат без сообщения:</label>
+                            <input type="text" class="event-format-no-msg" value="${escapeHtml(formatNoMsg)}" style="width:100%; background:#2a2a2d; border:1px solid #3a3a3d; padding:6px; color:white; border-radius:6px;">
+                         </div>
+                         <div style="margin-top:8px;">
+                            <label>Формат с сообщением:</label>
+                            <input type="text" class="event-format-with-msg" value="${escapeHtml(formatWithMsg)}" style="width:100%; background:#2a2a2d; border:1px solid #3a3a3d; padding:6px; color:white; border-radius:6px;">
+                         </div>
+                         <div style="margin-top:8px;">
+                            <label>🎭 Сопоставление награды с голосом</label>
+                            <div id="reward-voice-list-${ev}" class="reward-voice-list"></div>
+                            <button class="add-reward-voice-btn action-btn" data-event="${ev}">+ Добавить награду</button>
+                         </div>`;
+            }
+            
+            if (ev === 'raid') {
+                html += `<div style="margin-top:8px;"><label>Мин. зрителей: <input type="number" class="event-min-viewers" value="${minViewers}" style="width:100px; background:#2a2a2d; border:1px solid #3a3a3d; color:white; border-radius:4px;"></label></div>`;
+            }
+            
+            html += `</div>`;
+        }
+        container.innerHTML = html;
+        
+        // Обработчики для кнопок расширенных настроек
+        document.querySelectorAll('.event-advanced-toggle').forEach(btn => {
+            btn.onclick = (e) => {
+                const parent = btn.closest('.event-block');
+                const adv = parent.querySelector('.event-advanced-settings');
+                adv.style.display = adv.style.display === 'none' ? 'block' : 'none';
+            };
+        });
+        
+        // Рендер сопоставления наград для reward
+        const rewardMap = events.reward?.reward_voice_map || {};
+        renderRewardVoiceMapForEvent(rewardMap);
+        
+        // Обработчики кнопок добавления награды
+        document.querySelectorAll('.add-reward-voice-btn').forEach(btn => {
+            btn.onclick = () => addRewardVoiceRow(btn.dataset.event);
+        });
+    }
+
+    function renderRewardVoiceMapForEvent(map) {
+        const container = document.querySelector('#reward-voice-list-reward');
+        if (!container) return;
+        container.innerHTML = '';
+        const rewardsArray = Array.from(rewardsSet).sort();
+        for (const [reward, voiceCfg] of Object.entries(map)) {
+            const isObj = typeof voiceCfg === 'object';
+            const voice = isObj ? voiceCfg.voice : voiceCfg;
+            const rate = isObj ? (voiceCfg.rate || '+0%') : '+0%';
+            const volume = isObj ? (voiceCfg.volume || '+0%') : '+0%';
+            const pitch = isObj ? (voiceCfg.pitch || '+0Hz') : '+0Hz';
+            const div = document.createElement('div');
+            div.className = 'dynamic-list-item';
+            const datalistId = `reward-datalist-${Date.now()}-${Math.random()}`;
+            div.innerHTML = `
+                <input type="text" placeholder="Название награды" value="${escapeHtml(reward)}" class="reward-name" list="${datalistId}" style="flex:1;">
+                <datalist id="${datalistId}">${rewardsArray.map(r => `<option value="${escapeHtml(r)}">`).join('')}</datalist>
+                <select class="reward-voice-select" style="flex:1;">
+                    <option value="__silent__" ${voice === '__silent__' ? 'selected' : ''}>🔇 (не озвучивать)</option>
+                    ${availableVoices.map(v => `<option value="${v.name}" ${v.name===voice ? 'selected' : ''}>${v.name}</option>`).join('')}
+                </select>
+                <button class="reward-advanced-btn">⚙️</button>
+                <button class="remove-item">🗑️</button>
+                <div class="advanced-settings" style="width:100%;">
+                    <div class="slider-row"><label>⚡ Скорость</label><input type="range" class="reward-rate" min="-50" max="100" value="${parseInt(rate)}"><span class="reward-rate-val">${rate}</span></div>
+                    <div class="slider-row"><label>🔊 Громкость</label><input type="range" class="reward-volume" min="-50" max="50" value="${parseInt(volume)}"><span class="reward-vol-val">${volume}</span></div>
+                    <div class="slider-row"><label>🎵 Тон</label><input type="range" class="reward-pitch" min="-100" max="100" value="${parseInt(pitch)}"><span class="reward-pitch-val">${pitch}</span></div>
+                </div>
+            `;
+            const advBtn = div.querySelector('.reward-advanced-btn');
+            const advDiv = div.querySelector('.advanced-settings');
+            advBtn.onclick = () => advDiv.classList.toggle('show');
+            div.querySelector('.remove-item').onclick = () => div.remove();
+            container.appendChild(div);
+        }
+    }
+
+    function addRewardVoiceRow(eventType) {
+        const container = document.querySelector(`#reward-voice-list-${eventType}`);
+        if (!container) return;
+        const div = document.createElement('div');
+        div.className = 'dynamic-list-item';
+        const rewardsArray = Array.from(rewardsSet).sort();
+        const datalistId = `reward-datalist-${Date.now()}`;
+        div.innerHTML = `
+            <input type="text" placeholder="Название награды" class="reward-name" list="${datalistId}" style="flex:1;">
+            <datalist id="${datalistId}">${rewardsArray.map(r => `<option value="${escapeHtml(r)}">`).join('')}</datalist>
+            <select class="reward-voice-select" style="flex:1;">
+                <option value="__silent__">🔇 (не озвучивать)</option>
+                ${availableVoices.map(v => `<option value="${v.name}">${v.name}</option>`).join('')}
+            </select>
+            <button class="reward-advanced-btn">⚙️</button>
+            <button class="remove-item">🗑️</button>
+            <div class="advanced-settings" style="width:100%;">
+                <div class="slider-row"><label>⚡ Скорость</label><input type="range" class="reward-rate" min="-50" max="100" value="0"><span class="reward-rate-val">+0%</span></div>
+                <div class="slider-row"><label>🔊 Громкость</label><input type="range" class="reward-volume" min="-50" max="50" value="0"><span class="reward-vol-val">+0%</span></div>
+                <div class="slider-row"><label>🎵 Тон</label><input type="range" class="reward-pitch" min="-100" max="100" value="0"><span class="reward-pitch-val">+0Hz</span></div>
+            </div>
+        `;
+        const advBtn = div.querySelector('.reward-advanced-btn');
+        const advDiv = div.querySelector('.advanced-settings');
+        advBtn.onclick = () => advDiv.classList.toggle('show');
+        div.querySelector('.remove-item').onclick = () => div.remove();
+        container.appendChild(div);
+    }
+
+    function collectEventsFromModal() {
+        const eventTypes = ['follow', 'subscription', 'subscription_gift', 'cheer', 'raid', 'reward'];
+        const newEvents = {};
+        for (const ev of eventTypes) {
+            const block = document.querySelector(`.event-block[data-event="${ev}"]`);
+            if (!block) continue;
+            const enabled = block.querySelector('.event-enabled').checked;
+            const voice = block.querySelector('.event-voice-select').value;
+            
+            let rate = '+0%', volume = '+0%', pitch = '+0Hz';
+            const adv = block.querySelector('.event-advanced-settings');
+            if (adv) {
+                rate = adv.querySelector('.event-rate').value + '%';
+                volume = adv.querySelector('.event-volume').value + '%';
+                pitch = adv.querySelector('.event-pitch').value + 'Hz';
+            }
+            
+            let min_viewers = 0;
+            if (ev === 'raid') {
+                const mv = block.querySelector('.event-min-viewers');
+                if (mv) min_viewers = parseInt(mv.value) || 0;
+            }
+            
+            let format = '';
+            let format_no_msg = '', format_with_msg = '', reward_voice_map = {};
+            
+            if (ev === 'reward') {
+                const noMsg = block.querySelector('.event-format-no-msg');
+                if (noMsg) format_no_msg = noMsg.value;
+                const withMsg = block.querySelector('.event-format-with-msg');
+                if (withMsg) format_with_msg = withMsg.value;
+                
+                const rows = block.querySelectorAll('.reward-voice-list .dynamic-list-item');
+                reward_voice_map = {};
+                rows.forEach(row => {
+                    const rewardName = row.querySelector('.reward-name').value.trim();
+                    const rewardVoice = row.querySelector('.reward-voice-select').value;
+                    if (!rewardName) return;
+                    const advDiv = row.querySelector('.advanced-settings');
+                    if (advDiv && advDiv.classList.contains('show')) {
+                        const rRate = row.querySelector('.reward-rate').value + '%';
+                        const rVol = row.querySelector('.reward-volume').value + '%';
+                        const rPitch = row.querySelector('.reward-pitch').value + 'Hz';
+                        reward_voice_map[rewardName] = { voice: rewardVoice, rate: rRate, volume: rVol, pitch: rPitch };
+                    } else {
+                        reward_voice_map[rewardName] = rewardVoice;
+                    }
+                });
+            } else {
+                const formatInput = block.querySelector('.event-format');
+                if (formatInput) format = formatInput.value;
+            }
+            
+            newEvents[ev] = { enabled, voice, format, rate, volume, pitch, min_viewers, format_no_msg, format_with_msg, reward_voice_map };
+        }
+        return newEvents;
+    }
+
+    // ---------- Замена текста (без изменений) ----------
+    function renderTextReplacements(replacements) {
+        const container = document.getElementById('text-replacements-list');
+        if (!container) return;
+        container.innerHTML = '';
+        replacements.forEach(rep => {
+            const div = document.createElement('div');
+            div.className = 'dynamic-list-item';
+            div.innerHTML = `
+                <input type="text" placeholder="Старое" value="${escapeHtml(rep.from)}" class="rep-from" style="flex:1;">
+                <input type="text" placeholder="Новое" value="${escapeHtml(rep.to)}" class="rep-to" style="flex:1;">
+                <button class="remove-item">🗑️</button>
+            `;
+            div.querySelector('.remove-item').onclick = () => div.remove();
+            container.appendChild(div);
+        });
+    }
+
+    function getTextReplacementsFromUI() {
+        const items = document.querySelectorAll('#text-replacements-list .dynamic-list-item');
+        const reps = [];
+        items.forEach(item => {
+            const from = item.querySelector('.rep-from').value.trim();
+            const to = item.querySelector('.rep-to').value.trim();
+            if (from && to) reps.push({ from, to });
+        });
+        return reps;
+    }
+
+    // ---------- Загрузка конфига ----------
+    function updateRateLabel(v) { document.getElementById('rate-value').textContent = v>=0 ? `Быстрее (+${v}%)` : `Медленнее (${v}%)`; }
+    function updateVolumeLabel(v) { document.getElementById('volume-value').textContent = v>=0 ? `Громче (+${v}%)` : `Тише (${v}%)`; }
+    function updatePitchLabel(v) { document.getElementById('pitch-value').textContent = v>=0 ? `Выше (+${v}Hz)` : `Ниже (${v}Hz)`; }
+
+    async function loadCurrentConfig() {
+        try {
+            const r = await fetch('/api/config');
+            const d = await r.json();
+            currentConfig = d;
+            document.getElementById('event-cooldown-input').value = d.event_cooldown || 5;
+            document.getElementById('min-length-input').value = d.min_length || 3;
+            document.getElementById('max-length-input').value = d.max_length || 200;
+            document.getElementById('user-cooldown-input').value = d.user_cooldown || 10;
+            document.getElementById('filter-broadcaster-checkbox').checked = d.filter_broadcaster !== false;
+            document.getElementById('save-audio-checkbox').checked = d.save_audio !== false;
+            saveAudioMode = d.save_audio !== false;
+            ttsEnabledToggle.checked = d.tts_enabled !== false;
+            document.getElementById('read-all-messages-checkbox').checked = d.read_all_messages !== false;
+            document.getElementById('read-only-answered-checkbox').checked = d.read_only_answered === true;
+            document.getElementById('filter-highlighted-checkbox').checked = d.role_filters?.highlighted === true;
+            document.getElementById('filter-sub-checkbox').checked = d.role_filters?.subscription === true;
+            document.getElementById('filter-vip-checkbox').checked = d.role_filters?.vip === true;
+            document.getElementById('filter-moderator-checkbox').checked = d.role_filters?.moderator === true;
+            document.getElementById('filter-links-checkbox').checked = d.filter_links !== false;
+            document.getElementById('filter-emotes-checkbox').checked = d.filter_emotes === true;
+            document.getElementById('use-keywords-checkbox').checked = d.use_keywords === true;
+            document.getElementById('keywords-input').value = (d.keywords || []).join(', ');
+            document.getElementById('strip-keywords-checkbox').checked = d.strip_keywords_from_tts === true;
+            document.getElementById('ignore-chars-input').value = d.ignore_chars || '';
+            document.getElementById('blacklist-input').value = (d.blacklist_users || []).join(', ');
+            document.getElementById('whitelist-input').value = (d.whitelist_users || []).join(', ');
+            userVoiceMap = d.user_voice_map || {};
+            eventsConfig = d.events || {};
+            renderUserVoiceMapInModal(userVoiceMap);
+            renderEventsModal(eventsConfig);
+            renderTextReplacements(d.text_replacements || []);
+            const rate = parseInt(d.rate) || 0;
+            const vol = parseInt(d.volume) || 0;
+            const pitch = parseInt(d.pitch) || 0;
+            document.getElementById('rate-slider').value = rate; updateRateLabel(rate);
+            document.getElementById('volume-slider').value = vol; updateVolumeLabel(vol);
+            document.getElementById('pitch-slider').value = pitch; updatePitchLabel(pitch);
+            if (d.voice) document.getElementById('voice-select').value = d.voice;
+            const readAll = document.getElementById('read-all-messages-checkbox').checked;
+            document.getElementById('advanced-filters').style.display = readAll ? 'none' : 'block';
+            const useKw = document.getElementById('use-keywords-checkbox').checked;
+            document.getElementById('keywords-settings').style.display = useKw ? 'block' : 'none';
+        } catch(e) { console.error(e); }
+    }
+
+    // ---------- Сохранение настроек ----------
+    async function generateTTS(text, voice, rate, volume, pitch) {
+        const resp = await fetch('/api/generate', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text, voice, rate, volume, pitch })
+        });
+        if (!resp.ok) throw new Error(await resp.text());
+        const data = await resp.json();
+        return data.output;
+    }
+
+    async function testVoice() {
+        try {
+            const rate = document.getElementById('rate-slider').value;
+            const volume = document.getElementById('volume-slider').value;
+            const pitch = document.getElementById('pitch-slider').value;
+            const voice = document.getElementById('voice-select').value;
+            const filename = await generateTTS("Тест голоса", voice, `${rate}%`, `${volume}%`, `${pitch}Hz`);
+            enqueueAudio(filename);
+            addSystemMessage('🔊 Тест добавлен в очередь');
+        } catch(e) { alert(`Ошибка: ${e.message}`); }
+    }
+
+    async function saveAllSettings() {
+        const newEvents = collectEventsFromModal();
+        const newUserVoiceMap = getUserVoiceMapFromModal();
+        const cfg = {
+            voice: document.getElementById('voice-select').value,
+            rate: `${parseInt(document.getElementById('rate-slider').value)}%`,
+            volume: `${parseInt(document.getElementById('volume-slider').value)}%`,
+            pitch: `${parseInt(document.getElementById('pitch-slider').value)}Hz`,
+            event_cooldown: parseInt(document.getElementById('event-cooldown-input').value),
+            min_length: parseInt(document.getElementById('min-length-input').value),
+            max_length: parseInt(document.getElementById('max-length-input').value),
+            user_cooldown: parseInt(document.getElementById('user-cooldown-input').value),
+            filter_broadcaster: document.getElementById('filter-broadcaster-checkbox').checked,
+            save_audio: document.getElementById('save-audio-checkbox').checked,
+            tts_enabled: ttsEnabledToggle.checked,
+            read_all_messages: document.getElementById('read-all-messages-checkbox').checked,
+            read_only_answered: document.getElementById('read-only-answered-checkbox').checked,
+            role_filters: {
+                highlighted: document.getElementById('filter-highlighted-checkbox').checked,
+                subscription: document.getElementById('filter-sub-checkbox').checked,
+                vip: document.getElementById('filter-vip-checkbox').checked,
+                moderator: document.getElementById('filter-moderator-checkbox').checked,
+            },
+            filter_links: document.getElementById('filter-links-checkbox').checked,
+            filter_emotes: document.getElementById('filter-emotes-checkbox').checked,
+            use_keywords: document.getElementById('use-keywords-checkbox').checked,
+            keywords: document.getElementById('keywords-input').value.split(',').map(s=>s.trim()).filter(s=>s),
+            strip_keywords_from_tts: document.getElementById('strip-keywords-checkbox').checked,
+            ignore_chars: document.getElementById('ignore-chars-input').value,
+            blacklist_users: document.getElementById('blacklist-input').value.split(',').map(s=>s.trim()).filter(s=>s),
+            whitelist_users: document.getElementById('whitelist-input').value.split(',').map(s=>s.trim()).filter(s=>s),
+            user_voice_map: newUserVoiceMap,
+            text_replacements: getTextReplacementsFromUI(),
+            events: newEvents,
+        };
+        try {
+            const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify(cfg) });
+            if (!r.ok) throw new Error();
+            alert('Настройки сохранены!');
+            closeSettings();
+        } catch(e) { alert('Ошибка сохранения'); }
+    }
+
+    // ---------- UI настройки ----------
+    function openSettings() { settingsPanel.classList.add('open'); settingsOverlay.classList.add('active'); loadCurrentConfig(); loadVoices(); }
+    function closeSettings() { settingsPanel.classList.remove('open'); settingsOverlay.classList.remove('active'); }
+
+    // ---------- Инициализация ----------
+    openSettingsBtn.addEventListener('click', openSettings);
+    closeSettingsBtn.addEventListener('click', closeSettings);
+    settingsOverlay.addEventListener('click', closeSettings);
+    headerSaveBtn.addEventListener('click', saveAllSettings);
+    headerTestBtn.addEventListener('click', testVoice);
+    toggleAdvancedBtn.addEventListener('click', () => advancedDropdown.classList.toggle('show'));
+    closeAdvancedBtn.addEventListener('click', () => advancedDropdown.classList.remove('show'));
+    document.getElementById('rate-slider').addEventListener('input', e => updateRateLabel(parseInt(e.target.value)));
+    document.getElementById('volume-slider').addEventListener('input', e => updateVolumeLabel(parseInt(e.target.value)));
+    document.getElementById('pitch-slider').addEventListener('input', e => updatePitchLabel(parseInt(e.target.value)));
+    document.getElementById('read-all-messages-checkbox').addEventListener('change', e => document.getElementById('advanced-filters').style.display = e.target.checked ? 'none' : 'block');
+    document.getElementById('use-keywords-checkbox').addEventListener('change', e => document.getElementById('keywords-settings').style.display = e.target.checked ? 'block' : 'none');
+
+    openVoiceMapBtn.addEventListener('click', () => { renderUserVoiceMapInModal(userVoiceMap); voiceMapModal = new bootstrap.Modal(document.getElementById('voiceMapModal')); voiceMapModal.show(); });
+    openEventsBtn.addEventListener('click', () => { renderEventsModal(eventsConfig); eventsModal = new bootstrap.Modal(document.getElementById('eventsModal')); eventsModal.show(); });
+
+    document.getElementById('save-voice-map-btn').addEventListener('click', async () => {
+        const newMap = getUserVoiceMapFromModal();
+        try {
+            const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ user_voice_map: newMap }) });
+            if (r.ok) { userVoiceMap = newMap; addSystemMessage('✅ Голоса сохранены'); voiceMapModal.hide(); }
+            else alert('Ошибка сохранения');
+        } catch(e) { alert(e.message); }
+    });
+
+    document.getElementById('save-events-btn').addEventListener('click', async () => {
+        const newEvents = collectEventsFromModal();
+        try {
+            const r = await fetch('/api/config', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ events: newEvents }) });
+            if (r.ok) { eventsConfig = newEvents; addSystemMessage('✅ События сохранены'); eventsModal.hide(); }
+            else alert('Ошибка сохранения');
+        } catch(e) { alert(e.message); }
+    });
+
+    document.getElementById('add-user-voice-modal-btn').addEventListener('click', () => {
+        const container = document.getElementById('user-voice-list-modal');
+        const div = document.createElement('div');
+        div.className = 'dynamic-list-item';
+        const datalistId = `datalist-${Date.now()}`;
+        div.innerHTML = `
+            <input type="text" placeholder="Имя пользователя" class="map-user" list="${datalistId}" style="flex:1;">
+            <datalist id="${datalistId}">${Array.from(usernamesSet).sort().map(u => `<option value="${escapeHtml(u)}">`).join('')}</datalist>
+            <select class="map-voice" style="flex:1;">${availableVoices.map(v => `<option value="${v.name}">${v.name}</option>`).join('')}</select>
+            <button class="voice-advanced-btn">⚙️</button>
+            <button class="remove-item">🗑️</button>
+            <div class="advanced-settings" style="width:100%;">
+                <div class="slider-row"><label>⚡ Скорость</label><input type="range" class="adv-rate" min="-50" max="100" value="0"><span class="adv-rate-val">+0%</span></div>
+                <div class="slider-row"><label>🔊 Громкость</label><input type="range" class="adv-volume" min="-50" max="50" value="0"><span class="adv-vol-val">+0%</span></div>
+                <div class="slider-row"><label>🎵 Тон</label><input type="range" class="adv-pitch" min="-100" max="100" value="0"><span class="adv-pitch-val">+0Hz</span></div>
+            </div>
+        `;
+        const advBtn = div.querySelector('.voice-advanced-btn');
+        const advDiv = div.querySelector('.advanced-settings');
+        advBtn.onclick = () => advDiv.classList.toggle('show');
+        div.querySelector('.remove-item').onclick = () => div.remove();
+        container.appendChild(div);
+    });
+
+    document.getElementById('add-replacement-btn').addEventListener('click', () => {
+        const container = document.getElementById('text-replacements-list');
+        const div = document.createElement('div');
+        div.className = 'dynamic-list-item';
+        div.innerHTML = `
+            <input type="text" placeholder="Старое" class="rep-from" style="flex:1;">
+            <input type="text" placeholder="Новое" class="rep-to" style="flex:1;">
+            <button class="remove-item">🗑️</button>
+        `;
+        div.querySelector('.remove-item').onclick = () => div.remove();
+        container.appendChild(div);
+    });
+
+    document.addEventListener('click', () => { if (audioQueue.length && !isPlaying) playNext(); });
+
+    // Старт
+    loadRewardsCache();
+    loadUsernameCache();
+    fetchStatus();
+    statusUpdateInterval = setInterval(fetchStatus, 5000);
+    logsUpdateInterval = setInterval(fetchLogs, 2000);
+    connectSSE();
+    loadEmotes();
+    loadCurrentConfig();
+    loadVoices();
+</script>
+</body>
+</html>
