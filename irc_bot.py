@@ -162,7 +162,7 @@ class TwitchIRCBot:
                     if ':' not in part:
                         continue
                     eid, positions_str = part.split(':', 1)
-                    if not eid or not eid.isdigit():
+                    if not eid:
                         continue
                     emote_ids.append(eid)
                     positions = []
