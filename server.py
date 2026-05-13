@@ -260,6 +260,27 @@ def exchange_code_for_token(code):
     token_data = r.json()
     return token_data["access_token"], token_data.get("refresh_token")
 
+def refresh_twitch_token(refresh_token: str):
+    data = {
+        "client_id": CLIENT_ID,
+        "client_secret": CLIENT_SECRET,
+        "grant_type": "refresh_token",
+        "refresh_token": refresh_token
+    }
+    try:
+        r = requests.post("https://id.twitch.tv/oauth2/token", data=data, timeout=15)
+        if r.status_code != 200:
+            logger.warning(f"Token refresh failed: {r.status_code} {r.text[:200]}")
+            return None, None
+        token_data = r.json()
+        new_access = token_data["access_token"]
+        new_refresh = token_data.get("refresh_token", refresh_token)
+        logger.info("✅ Token refreshed successfully")
+        return new_access, new_refresh
+    except Exception as e:
+        logger.error(f"Token refresh error: {e}")
+        return None, None
+
 def get_user_from_token(access_token):
     headers = {
         "Client-ID": CLIENT_ID,
@@ -647,8 +668,24 @@ def start_event_sub(token, refresh_token, user_id):
             data["_source"] = "eventsub"
             handle_message(data)
 
+    async def async_token_refresher():
+        nonlocal token
+        r_token = config.get("twitch_refresh_token", "")
+        if not r_token:
+            return None
+        new_token, new_refresh = refresh_twitch_token(r_token)
+        if new_token:
+            token = new_token
+            config["twitch_token"] = new_token
+            if new_refresh:
+                config["twitch_refresh_token"] = new_refresh
+            save_config(config)
+            return new_token
+        return None
+
     event_sub_client = TwitchEventSubClient(
-        CLIENT_ID, CLIENT_SECRET, token, refresh_token, user_id, eventsub_callback
+        CLIENT_ID, CLIENT_SECRET, token, refresh_token, user_id,
+        eventsub_callback, token_refresher=async_token_refresher
     )
 
     def run_loop():
@@ -702,17 +739,38 @@ def auto_start_twitch():
         config["twitch_login"] = login
         save_config(config)
     else:
+        token_valid = False
         try:
             headers = {
                 "Client-ID": CLIENT_ID,
                 "Authorization": f"Bearer {token}"
             }
             r = requests.get("https://api.twitch.tv/helix/users", headers=headers, timeout=10)
-            if r.status_code != 200:
-                logger.info("🔄 Токен недействителен. Повторная авторизация...")
+            if r.status_code == 200:
+                token_valid = True
+        except Exception as e:
+            logger.warning(f"Ошибка проверки токена: {e}")
+
+        if not token_valid:
+            refresh = config.get("twitch_refresh_token", "")
+            if refresh:
+                logger.info("🔄 Токен истёк, пытаюсь обновить через refresh_token...")
+                new_token, new_refresh = refresh_twitch_token(refresh)
+                if new_token:
+                    token = new_token
+                    config["twitch_token"] = token
+                    if new_refresh:
+                        config["twitch_refresh_token"] = new_refresh
+                    save_config(config)
+                    token_valid = True
+                    logger.info("✅ Токен обновлён через refresh_token")
+                else:
+                    logger.warning("Refresh token не сработал")
+            if not token_valid:
+                logger.info("🔐 Запускаю полный OAuth...")
                 token, user_id, login, refresh_token = perform_full_oauth()
                 if not token:
-                    logger.error("❌ Повторная авторизация не удалась. Бот не запущен.")
+                    logger.error("❌ Авторизация не удалась. Бот не запущен.")
                     return
                 channel = f"#{login}"
                 config["twitch_token"] = token
@@ -721,8 +779,6 @@ def auto_start_twitch():
                 config["twitch_user_id"] = user_id
                 config["twitch_login"] = login
                 save_config(config)
-        except Exception as e:
-            logger.warning(f"Ошибка проверки токена: {e}")
 
     start_event_sub(token, config.get("twitch_refresh_token", ""), config["twitch_user_id"])
 

@@ -11,13 +11,14 @@ logger = logging.getLogger(__name__)
 class TwitchEventSubClient:
     def __init__(self, client_id: str, client_secret: str,
                  access_token: str, refresh_token: str,
-                 user_id: str, callback):
+                 user_id: str, callback, token_refresher=None):
         self.client_id = client_id
         self.client_secret = client_secret
         self.access_token = access_token
         self.refresh_token = refresh_token
         self.user_id = user_id
         self.callback = callback
+        self.token_refresher = token_refresher
         self.websocket = None
         self.session_id = None
         self.running = False
@@ -77,38 +78,57 @@ class TwitchEventSubClient:
             await self._subscribe(event_type, version, condition)
 
     async def _subscribe(self, event_type, version, condition):
-        try:
-            async with aiohttp.ClientSession() as session:
-                headers = {
-                    'Authorization': f'Bearer {self.access_token}',
-                    'Client-Id': self.client_id,
-                    'Content-Type': 'application/json'
-                }
-                payload = {
-                    'type': event_type,
-                    'version': version,
-                    'condition': condition,
-                    'transport': {
-                        'method': 'websocket',
-                        'session_id': self.session_id
+        for attempt in range(2):
+            try:
+                async with aiohttp.ClientSession() as session:
+                    headers = {
+                        'Authorization': f'Bearer {self.access_token}',
+                        'Client-Id': self.client_id,
+                        'Content-Type': 'application/json'
                     }
-                }
-                async with session.post(
-                    'https://api.twitch.tv/helix/eventsub/subscriptions',
-                    headers=headers,
-                    json=payload
-                ) as resp:
-                    if resp.status == 202:
-                        logger.info(f"📡 Подписался: {event_type}")
-                    elif resp.status == 401:
-                        logger.error("❌ Токен истёк, требуется повторная авторизация")
-                    else:
-                        text = await resp.text()
-                        logger.error(f"❌ Ошибка подписки {event_type}: {resp.status} - {text}")
-        except aiohttp.ClientResponseError as e:
-            logger.error(f"HTTP ошибка при подписке {event_type}: {e.status} {e.message}")
-        except Exception as e:
-            logger.error(f"Исключение при подписке {event_type}: {e}")
+                    payload = {
+                        'type': event_type,
+                        'version': version,
+                        'condition': condition,
+                        'transport': {
+                            'method': 'websocket',
+                            'session_id': self.session_id
+                        }
+                    }
+                    async with session.post(
+                        'https://api.twitch.tv/helix/eventsub/subscriptions',
+                        headers=headers,
+                        json=payload
+                    ) as resp:
+                        if resp.status == 202:
+                            logger.info(f"📡 Подписался: {event_type}")
+                            return
+                        elif resp.status == 401 and attempt == 0 and self.token_refresher:
+                            logger.warning(f"❌ Токен истёк при подписке {event_type}, обновляю...")
+                            new_token = await self.token_refresher()
+                            if new_token:
+                                self.access_token = new_token
+                                logger.info(f"✅ Токен обновлён, повторная подписка {event_type}")
+                                continue
+                            else:
+                                logger.error("❌ Не удалось обновить токен")
+                                return
+                        else:
+                            text = await resp.text()
+                            logger.error(f"❌ Ошибка подписки {event_type}: {resp.status} - {text}")
+                            return
+            except aiohttp.ClientResponseError as e:
+                if attempt == 0 and e.status == 401 and self.token_refresher:
+                    logger.warning(f"401 при подписке {event_type}, обновляю токен...")
+                    new_token = await self.token_refresher()
+                    if new_token:
+                        self.access_token = new_token
+                        continue
+                logger.error(f"HTTP ошибка при подписке {event_type}: {e.status} {e.message}")
+                return
+            except Exception as e:
+                logger.error(f"Исключение при подписке {event_type}: {e}")
+                return
 
     async def _handle_message(self, message):
         try:
