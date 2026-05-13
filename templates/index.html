@@ -188,12 +188,14 @@
                 <label class="checkbox-label"><input type="checkbox" id="read-all-messages-checkbox"> 📢 Озвучивать все сообщения</label>
             </div>
             <div id="advanced-filters">
-                <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="read-only-answered-checkbox"> 💬 Озвучивать сообщения только с ответом</label></div>
-                <div class="settings-group"><label>👥 Роли (озвучивать, если не все сообщения)</label>
-                    <div><label class="checkbox-label"><input type="checkbox" id="filter-highlighted-checkbox"> Выделенные сообщения</label></div>
-                    <div><label class="checkbox-label"><input type="checkbox" id="filter-sub-checkbox"> Подписчики</label></div>
-                    <div><label class="checkbox-label"><input type="checkbox" id="filter-vip-checkbox"> VIP</label></div>
-                    <div><label class="checkbox-label"><input type="checkbox" id="filter-moderator-checkbox"> Модераторы</label></div>
+                <div id="role-filters-section">
+                    <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="read-only-answered-checkbox"> 💬 Озвучивать сообщения только с ответом</label></div>
+                    <div class="settings-group"><label>👥 Роли (озвучивать, если не все сообщения)</label>
+                        <div><label class="checkbox-label"><input type="checkbox" id="filter-highlighted-checkbox"> Выделенные сообщения</label></div>
+                        <div><label class="checkbox-label"><input type="checkbox" id="filter-sub-checkbox"> Подписчики</label></div>
+                        <div><label class="checkbox-label"><input type="checkbox" id="filter-vip-checkbox"> VIP</label></div>
+                        <div><label class="checkbox-label"><input type="checkbox" id="filter-moderator-checkbox"> Модераторы</label></div>
+                    </div>
                 </div>
                 <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="filter-links-checkbox"> 🔗 Игнорировать ссылки</label></div>
                 <div class="settings-group"><label class="checkbox-label"><input type="checkbox" id="filter-emotes-checkbox"> 😀 Игнорировать смайлики</label></div>
@@ -820,6 +822,8 @@
             document.getElementById('volume-slider').value = vol; updateVolumeLabel(vol);
             document.getElementById('pitch-slider').value = pitch; updatePitchLabel(pitch);
             if (d.voice) document.getElementById('voice-select').value = d.voice;
+            const readAll = document.getElementById('read-all-messages-checkbox').checked;
+            document.getElementById('role-filters-section').style.display = readAll ? 'none' : 'block';
             const useKw = document.getElementById('use-keywords-checkbox').checked;
             document.getElementById('keywords-settings').style.display = useKw ? 'block' : 'none';
         } catch(e) { console.error(e); }
@@ -907,6 +911,7 @@
     document.getElementById('rate-slider').addEventListener('input', e => updateRateLabel(parseInt(e.target.value)));
     document.getElementById('volume-slider').addEventListener('input', e => updateVolumeLabel(parseInt(e.target.value)));
     document.getElementById('pitch-slider').addEventListener('input', e => updatePitchLabel(parseInt(e.target.value)));
+    document.getElementById('read-all-messages-checkbox').addEventListener('change', e => document.getElementById('role-filters-section').style.display = e.target.checked ? 'none' : 'block');
     document.getElementById('use-keywords-checkbox').addEventListener('change', e => document.getElementById('keywords-settings').style.display = e.target.checked ? 'block' : 'none');
 
     openVoiceMapBtn.addEventListener('click', () => { renderUserVoiceMapInModal(userVoiceMap); voiceMapModal = new bootstrap.Modal(document.getElementById('voiceMapModal')); voiceMapModal.show(); });
