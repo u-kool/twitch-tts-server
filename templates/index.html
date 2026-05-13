@@ -34,7 +34,6 @@
         .log-text { word-break:break-word; }
         .log-text img { vertical-align:middle; max-height:1.4em; margin:0 1px; }
         .empty-chat { text-align:center; color:#5a5a66; padding:40px; font-size:14px; }
-        .emotes-loading { text-align:center; color:#ffd700; padding:8px; font-size:12px; }
         .settings-panel { position:fixed; top:0; right:-500px; width:500px; height:100vh; background:#18181b; border-left:1px solid #2a2a2d; transition:right 0.3s; z-index:1000; display:flex; flex-direction:column; box-shadow:-5px 0 20px rgba(0,0,0,0.5); }
         .settings-panel.open { right:0; }
         .settings-header { padding:12px 20px; border-bottom:1px solid #2a2a2d; display:flex; justify-content:space-between; align-items:center; }
@@ -108,7 +107,6 @@
         <div id="log-container" class="log-container">
             <div class="empty-chat">💬 Сообщения чата появятся здесь...</div>
         </div>
-        <div id="emotes-status" class="emotes-loading" style="display:none;">😊 Загрузка смайлов...</div>
     </div>
 
     <!-- Modal: сопоставление автора с голосом -->
@@ -224,7 +222,7 @@
     let emotesLoaded = false;
     let saveAudioMode = true;
 
-    let audioQueue = [], isPlaying = false, currentAudio = null;
+    let audioQueue = [], isPlaying = false, currentAudio = null, audioUnlocked = false;
     let usernamesSet = new Set();
     const USERNAMES_STORAGE_KEY = 'twitch_tts_usernames';
     let rewardsSet = new Set();          // кеш названий наград
@@ -245,7 +243,6 @@
     const streamerNameSpan = document.getElementById('streamer-name');
     const statusDot = document.getElementById('status-dot');
     const statusTextSpan = document.getElementById('status-text');
-    const emotesStatus = document.getElementById('emotes-status');
     const headerSaveBtn = document.getElementById('header-save-btn');
     const headerTestBtn = document.getElementById('header-test-btn');
     const ttsEnabledToggle = document.getElementById('tts-enabled-toggle');
@@ -270,11 +267,13 @@
         return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     }
 
-    function parseEmotes(message) {
-        if (!message || Object.keys(emoteMap).length === 0) return escapeHtml(message);
+    function parseEmotes(message, extraEmotes) {
+        if (!message) return escapeHtml(message);
+        const allEmotes = Object.assign({}, emoteMap, extraEmotes || {});
+        if (Object.keys(allEmotes).length === 0) return escapeHtml(message);
         let result = escapeHtml(message);
-        for (const [emote, url] of Object.entries(emoteMap)) {
-            const re = new RegExp(`\\b${escapeRegex(emote)}\\b`, 'g');
+        for (const [emote, url] of Object.entries(allEmotes)) {
+            const re = new RegExp(`(?<=^|\\s)${escapeRegex(emote)}(?=\\s|$)`, 'g');
             result = result.replace(re, `<img src="${url}" alt="${emote}" style="height:1.4em;">`);
         }
         return result;
@@ -340,8 +339,8 @@
         }
         const textSpan = document.createElement('span');
         textSpan.className = 'log-text';
-        if (log.type === 'chat' && emotesLoaded && Object.keys(emoteMap).length) {
-            textSpan.innerHTML = parseEmotes(log.text);
+        if (log.type === 'chat' && emotesLoaded) {
+            textSpan.innerHTML = parseEmotes(log.text, log.emotes);
         } else {
             textSpan.textContent = escapeHtml(log.text);
         }
@@ -392,7 +391,8 @@
         audio.onended = () => playNext();
         audio.onerror = () => playNext();
         audio.play().catch(err => {
-            if (err.name === 'NotAllowedError') {
+            if (err.name === 'NotAllowedError' && !audioUnlocked) {
+                audioUnlocked = true;
                 addSystemMessage('🔇 Нажмите любую кнопку для разблокировки звука');
                 isPlaying = false;
                 audioQueue.unshift(item);
@@ -444,16 +444,13 @@
 
     // ---------------------- Эмоуты ----------------------
     async function loadEmotes() {
-        emotesStatus.style.display = 'block';
         try {
             const resp = await fetch('/api/emotes');
             if (resp.ok) {
                 emoteMap = await resp.json();
                 emotesLoaded = true;
-                emotesStatus.textContent = '😊 Смайлы загружены';
-                setTimeout(() => emotesStatus.style.display = 'none', 2000);
             }
-        } catch(e) { emotesStatus.textContent = '⚠ Ошибка загрузки смайлов'; }
+        } catch(e) { console.error('Emotes load error:', e); }
     }
 
     // ---------------------- Кэш имён ----------------------
@@ -973,7 +970,7 @@
         container.appendChild(div);
     });
 
-    document.addEventListener('click', () => { if (audioQueue.length && !isPlaying) playNext(); });
+    document.addEventListener('click', () => { audioUnlocked = true; if (audioQueue.length && !isPlaying) playNext(); });
 
     // Старт
     loadRewardsCache();

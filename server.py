@@ -299,14 +299,17 @@ def perform_full_oauth():
         logger.error(f"❌ Ошибка получения токена: {e}")
         return None, None, None, None
 
-def log_to_queue(msg_type: str, text: str, user: str = None):
+def log_to_queue(msg_type: str, text: str, user: str = None, emotes: dict = None):
     try:
-        message_queue.put_nowait({
+        entry = {
             "type": msg_type,
             "user": user,
             "text": text,
             "timestamp": time.time()
-        })
+        }
+        if emotes:
+            entry["emotes"] = emotes
+        message_queue.put_nowait(entry)
     except:
         pass
 
@@ -587,11 +590,11 @@ def handle_message(event: dict):
     if event_type == "chat":
         text = event.get("text", "").strip()
         user = event.get("user", "Аноним")
-        log_to_queue("chat", text, user)
 
         # Динамически добавляем неизвестные emote_id в emoteMap
         global emoteMap
         emote_positions = event.get("emote_positions", {})
+        emotes_used = {}
         for eid, positions in emote_positions.items():
             if not eid:
                 continue
@@ -600,10 +603,14 @@ def handle_message(event: dict):
                 if 0 <= start < end <= len(text):
                     name = text[start:end+1]
                     break
-            if name and name not in emoteMap:
+            if name:
                 url = f"https://static-cdn.jtvnw.net/emoticons/v2/{eid}/default/dark/1.0"
-                emoteMap[name] = url
-                broadcast_sse({"event": "new_emote", "name": name, "url": url})
+                emotes_used[name] = url
+                if name not in emoteMap:
+                    emoteMap[name] = url
+                    broadcast_sse({"event": "new_emote", "name": name, "url": url})
+
+        log_to_queue("chat", text, user, emotes_used)
         allowed, processed_text, tts_params = should_tts_message(event)
         if not allowed:
             return
