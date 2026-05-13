@@ -15,6 +15,9 @@ config.json
 outputs/
 voices/
 
+# PID file
+server.pid
+
 # Placeholder/empty
 python
 
