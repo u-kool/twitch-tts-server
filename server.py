@@ -1263,6 +1263,7 @@ def print_banner():
 if __name__ == "__main__":
     print_banner()
     auto_start_twitch()
+    webbrowser.open(f"http://{config['host']}:{config['port']}")
     try:
         app.run(
             host=config["host"],
