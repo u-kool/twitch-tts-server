@@ -5,6 +5,7 @@ import threading
 import re
 import logging
 import time
+from collections import deque
 
 logger = logging.getLogger(__name__)
 
@@ -22,6 +23,7 @@ class TwitchIRCBot:
         self._connected = False
         self._connect_event = threading.Event()
         self.emote_sets = []
+        self._sent_messages = deque(maxlen=20)
 
     def start(self):
         if self.running:
@@ -53,6 +55,7 @@ class TwitchIRCBot:
         try:
             msg = f"PRIVMSG {self.channel} :{message}\r\n"
             self.sock.send(msg.encode())
+            self._sent_messages.append((message, time.time()))
             return True
         except Exception as e:
             logger.error(f"Send error: {e}")
@@ -140,6 +143,13 @@ class TwitchIRCBot:
         if match:
             user = match.group(1)
             text = match.group(2)
+
+            # Игнорируем эхо от собственных сообщений бота (но не сообщения стримера из чата)
+            if user.lower() == self.nick:
+                now = time.time()
+                for sent_text, sent_ts in list(self._sent_messages):
+                    if text.strip() == sent_text.strip() and now - sent_ts < 3.0:
+                        return
 
             badges = tags.get('badges', '')
             roles = [b.split('/')[0] for b in badges.split(',') if b]

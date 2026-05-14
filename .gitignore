@@ -7,6 +7,10 @@ python/
 
 # Config with secrets
 config.json
+twitch_oauth.json
+
+# External reference folder (user-created)
+alltalk_tts-main/
 
 # Logs
 *.log
@@ -14,6 +18,13 @@ config.json
 # Generated audio
 outputs/
 voices/
+голоса/
+
+# XTTS model files (large binaries, download separately)
+models/
+
+# Cached latents
+latents/
 
 # PID file
 server.pid

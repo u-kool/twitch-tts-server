@@ -12,9 +12,6 @@ import logging
 import threading
 import queue
 import requests
-import http.server
-import urllib.parse
-import webbrowser
 import subprocess
 import hashlib
 import re
@@ -23,8 +20,19 @@ from flask import Flask, render_template, request, jsonify, send_file, Response
 from werkzeug.utils import secure_filename
 
 # ========== НАСТРОЙКИ Twitch API ==========
-CLIENT_ID = "fsiif72enf4wf6jg4omgxtif5aj0y9"
-CLIENT_SECRET = "eqi3d46kce2mt1z3hdz7eflw27lcjd"
+OAUTH_FILE = "twitch_oauth.json"
+CLIENT_ID = os.environ.get("TWITCH_CLIENT_ID")
+CLIENT_SECRET = os.environ.get("TWITCH_CLIENT_SECRET")
+if not CLIENT_ID or not CLIENT_SECRET:
+    try:
+        with open(OAUTH_FILE) as f:
+            oauth = json.load(f)
+        CLIENT_ID = oauth["client_id"]
+        CLIENT_SECRET = oauth["client_secret"]
+    except (FileNotFoundError, KeyError, json.JSONDecodeError) as e:
+        print(f"❌ Не удалось загрузить CLIENT_ID/CLIENT_SECRET из {OAUTH_FILE} "
+              f"или переменных окружения TWITCH_CLIENT_ID/TWITCH_CLIENT_SECRET: {e}")
+        sys.exit(1)
 REDIRECT_URI = "http://localhost:3000/redirect/"
 OAUTH_PORT = 3000
 # =========================================
@@ -45,10 +53,16 @@ logging.getLogger("asyncio").setLevel(logging.WARNING)
 logging.getLogger("websockets").setLevel(logging.WARNING)
 logging.getLogger("aiohttp").setLevel(logging.WARNING)
 
+from core.config_store import ConfigStore
+from core.runtime_events import RuntimeEvents
+from core.tts_runner import TTSRunner
 from core.tts_engine import TTSEngine
-from core.twitch_api_client import TwitchApiClient
+from core.xtts_engine import XTTSv2Engine
+from core.twitch_auth import TwitchAuth
 from core.twitch_eventsub_api import TwitchEventSubClient
 from irc_bot import TwitchIRCBot
+
+twitch_auth = TwitchAuth(CLIENT_ID, CLIENT_SECRET, redirect_uri=REDIRECT_URI, oauth_port=OAUTH_PORT)
 
 CONFIG_FILE = Path("config.json")
 OUTPUTS_DIR = Path("outputs")
@@ -65,7 +79,7 @@ DEFAULT_CONFIG = {
     "twitch_user_id": "",
     "twitch_login": "",
     "filter_mods": True,
-    "filter_broadcaster": True,
+    "filter_broadcaster": False,
     "min_length": 3,
     "max_length": 200,
     "user_cooldown": 10,
@@ -97,6 +111,11 @@ DEFAULT_CONFIG = {
     "whitelist_users": [],
     "user_voice_map": {},
     "text_replacements": [],
+    "tts_engine": "edge-tts",
+    "xtts_voice": "female_01.wav",
+    "xtts_language": "ru",
+    "xtts_temperature": 0.75,
+    "xtts_repetition_penalty": 10.0,
     "events": {
         "follow": {"enabled": True, "voice": "ru-RU-SvetlanaNeural", "format": "{UserName} отслеживает {Service} канал", "rate": "+0%", "volume": "+0%", "pitch": "+0Hz"},
         "subscription": {"enabled": True, "voice": "ru-RU-SvetlanaNeural", "format": "{UserName} подписался на {Service} канал (уровень {Tier})", "rate": "+0%", "volume": "+0%", "pitch": "+0Hz"},
@@ -132,61 +151,34 @@ def deep_merge(base, overrides):
             base[key] = value
     return base
 
-def load_config() -> dict:
-    if CONFIG_FILE.exists():
-        try:
-            with open(CONFIG_FILE, "r", encoding="utf-8") as f:
-                config = json.load(f)
-            merged = DEFAULT_CONFIG.copy()
-            deep_merge(merged, config)
-            # Миграция: преобразовать строковые user_voice_map в объекты при необходимости
-            for user, val in merged.get("user_voice_map", {}).items():
-                if isinstance(val, str):
-                    merged["user_voice_map"][user] = {"voice": val, "rate": merged.get("rate", "+0%"), "volume": merged.get("volume", "+0%"), "pitch": merged.get("pitch", "+0Hz")}
-            # Миграция для событий: добавить rate/volume/pitch если их нет
-            for ev in merged.get("events", {}).values():
-                if isinstance(ev, dict):
-                    ev.setdefault("rate", merged.get("rate", "+0%"))
-                    ev.setdefault("volume", merged.get("volume", "+0%"))
-                    ev.setdefault("pitch", merged.get("pitch", "+0Hz"))
-                    if ev.get("reward_voice_map") is not None:
-                        for reward, cfg in ev["reward_voice_map"].items():
-                            if isinstance(cfg, str):
-                                ev["reward_voice_map"][reward] = {"voice": cfg, "rate": ev.get("rate", "+0%"), "volume": ev.get("volume", "+0%"), "pitch": ev.get("pitch", "+0Hz")}
-                    # Удаляем устаревшие ключи
-                    ev.pop("enable_unmapped_rewards", None)
-                    ev.pop("default_voice", None)
-            return merged
-        except Exception as e:
-            logger.warning(f"⚠️ Config error: {e}")
-    return DEFAULT_CONFIG.copy()
+config_store = ConfigStore(CONFIG_FILE, DEFAULT_CONFIG)
+
 
 def save_config(config: dict) -> bool:
     try:
-        with open(CONFIG_FILE, "w", encoding="utf-8") as f:
-            json.dump(config, f, indent=2, ensure_ascii=False)
+        config_store.save(config)
         return True
     except Exception as e:
         logger.error(f"❌ Save config error: {e}")
         return False
 
-config = load_config()
+
+config = config_store.load()
 cached_emotes = {}
 emotes_last_fetch = 0
 EMOTES_CACHE_TTL = 600
-tts_engine = TTSEngine(voice=config["voice"])
-message_queue = queue.Queue(maxsize=200)
+tts_engine = TTSEngine(voice=config.get("voice", "ru-RU-SvetlanaNeural"))
+runtime_events = RuntimeEvents()
 twitch_bot: TwitchIRCBot = None
 twitch_running = False
 event_sub_client: TwitchEventSubClient = None
 event_sub_thread: threading.Thread = None
 
+# TTS worker: асинхронная очередь, чтобы IRC и EventSub не блокировались
+tts_runner = None
+
 last_tts_time = {}
 last_event_tts_time = 0
-
-sse_queue = queue.Queue()
-sse_clients = []
-sse_lock = threading.Lock()
 
 app = Flask(__name__,
             template_folder="templates",
@@ -196,183 +188,33 @@ app = Flask(__name__,
 
 emoteMap = {}
 
-# === OAuth Server ===
-class OAuthHandler(http.server.BaseHTTPRequestHandler):
-    code = None
-    error = None
-    event = threading.Event()
-
-    def do_GET(self):
-        parsed = urllib.parse.urlparse(self.path)
-        query = urllib.parse.parse_qs(parsed.query)
-        if "code" in query:
-            OAuthHandler.code = query["code"][0]
-            self.send_response(200)
-            self.send_header("Content-type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write("<html><body><h2>✅ Успешная авторизация!</h2><p>Можно закрыть окно.</p></body></html>".encode())
-            OAuthHandler.event.set()
-        elif "error" in query:
-            OAuthHandler.error = query["error"][0]
-            self.send_response(400)
-            self.send_header("Content-type", "text/html; charset=utf-8")
-            self.end_headers()
-            self.wfile.write(f"<html><body><h2>❌ Ошибка: {OAuthHandler.error}</h2></body></html>".encode())
-            OAuthHandler.event.set()
-        else:
-            self.send_response(400)
-            self.end_headers()
-
-    def log_message(self, format, *args):
-        pass
-
-def start_oauth_server():
-    server = http.server.HTTPServer(("localhost", OAUTH_PORT), OAuthHandler)
-    thread = threading.Thread(target=server.serve_forever, daemon=True)
-    thread.start()
-    return server, thread
-
-def get_auth_url():
-    params = {
-        "client_id": CLIENT_ID,
-        "redirect_uri": REDIRECT_URI,
-        "response_type": "code",
-        "scope": " ".join([
-            "chat:read", "chat:edit",
-            "channel:read:subscriptions", "channel:read:redemptions",
-            "bits:read", "channel:read:hype_train",
-            "moderator:read:followers",
-            "channel:manage:redemptions",
-        ]),
-        "force_verify": "true"
-    }
-    return "https://id.twitch.tv/oauth2/authorize?" + urllib.parse.urlencode(params)
-
-def exchange_code_for_token(code):
-    data = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "code": code,
-        "grant_type": "authorization_code",
-        "redirect_uri": REDIRECT_URI
-    }
-    r = requests.post("https://id.twitch.tv/oauth2/token", data=data)
-    r.raise_for_status()
-    token_data = r.json()
-    return token_data["access_token"], token_data.get("refresh_token")
-
 def refresh_twitch_token(refresh_token: str):
-    data = {
-        "client_id": CLIENT_ID,
-        "client_secret": CLIENT_SECRET,
-        "grant_type": "refresh_token",
-        "refresh_token": refresh_token
-    }
-    try:
-        r = requests.post("https://id.twitch.tv/oauth2/token", data=data, timeout=15)
-        if r.status_code != 200:
-            logger.warning(f"Token refresh failed: {r.status_code} {r.text[:200]}")
-            return None, None
-        token_data = r.json()
-        new_access = token_data["access_token"]
-        new_refresh = token_data.get("refresh_token", refresh_token)
+    new_access, new_refresh = twitch_auth.refresh_access_token(refresh_token)
+    if new_access:
         logger.info("✅ Token refreshed successfully")
-        return new_access, new_refresh
-    except Exception as e:
-        logger.error(f"Token refresh error: {e}")
-        return None, None
-
-def get_user_from_token(access_token):
-    headers = {
-        "Client-ID": CLIENT_ID,
-        "Authorization": f"Bearer {access_token}"
-    }
-    r = requests.get("https://api.twitch.tv/helix/users", headers=headers)
-    r.raise_for_status()
-    users = r.json()["data"]
-    if not users:
-        raise Exception("Не удалось получить данные пользователя")
-    return users[0]["id"], users[0]["login"]
+    else:
+        logger.warning("Token refresh failed")
+    return new_access, new_refresh
 
 def perform_full_oauth():
-    OAuthHandler.code = None
-    OAuthHandler.error = None
-    OAuthHandler.event.clear()
     logger.info("🌐 Запуск OAuth-сервера...")
-    server, thread = start_oauth_server()
-    auth_url = get_auth_url()
-    logger.info("🚀 Открытие браузера для авторизации...")
-    webbrowser.open(auth_url)
-    if not OAuthHandler.event.wait(timeout=120):
-        logger.error("❌ Таймаут авторизации")
-        server.shutdown()
-        return None, None, None, None
-    server.shutdown()
-    if OAuthHandler.error:
-        logger.error(f"❌ Ошибка авторизации: {OAuthHandler.error}")
-        return None, None, None, None
-    code = OAuthHandler.code
-    try:
-        access_token, refresh_token = exchange_code_for_token(code)
-        user_id, login = get_user_from_token(access_token)
-        logger.info(f"✅ Авторизация успешна: {login} (ID: {user_id})")
-        return access_token, user_id, login, refresh_token
-    except Exception as e:
-        logger.error(f"❌ Ошибка получения токена: {e}")
-        return None, None, None, None
+    result = twitch_auth.perform_full_oauth()
+    if result[0]:
+        logger.info(f"✅ Авторизация успешна: {result[2]} (ID: {result[1]})")
+    else:
+        logger.error("❌ Ошибка авторизации")
+    return result
 
 def log_to_queue(msg_type: str, text: str, user: str = None, emotes: dict = None):
-    try:
-        entry = {
-            "type": msg_type,
-            "user": user,
-            "text": text,
-            "timestamp": time.time()
-        }
-        if emotes:
-            entry["emotes"] = emotes
-        message_queue.put_nowait(entry)
-    except:
-        pass
+    runtime_events.log(msg_type=msg_type, text=text, user=user, emotes=emotes)
 
 def broadcast_sse(message: dict):
-    with sse_lock:
-        for client_queue in sse_clients:
-            try:
-                client_queue.put_nowait(message)
-            except queue.Full:
-                pass
+    runtime_events.broadcast(message)
 
-def tts_wrapper(text: str, voice: str = None, rate: str = None, volume: str = None, pitch: str = None):
-    if not config.get("tts_enabled", True):
+def tts_wrapper(text: str, voice: str = None, rate: str = None, volume: str = None, pitch: str = None, **kwargs):
+    if tts_runner is None:
         return False
-    voice = voice or config["voice"]
-    rate = rate or _normalize_tts_param(config.get("rate", "+0%"), '%')
-    volume = volume or _normalize_tts_param(config.get("volume", "+0%"), '%')
-    pitch = pitch or _normalize_tts_param(config.get("pitch", "+0Hz"), 'Hz')
-    try:
-        file_hash = hashlib.md5(f"{text}{voice}{time.time()}".encode()).hexdigest()[:10]
-        output_path = OUTPUTS_DIR / f"tts_{file_hash}.mp3"
-        cmd = [
-            "edge-tts", "--text", text, "--voice", voice,
-            "--rate", rate, "--volume", volume, "--pitch", pitch,
-            "--write-media", str(output_path)
-        ]
-        logger.info(f"🔊 TTS command: {' '.join(cmd)}")
-        subprocess.run(cmd, check=True, capture_output=True, timeout=30)
-        logger.info(f"🔊 TTS: {text[:50]}...")
-        log_to_queue("system", f"Озвучено: {text[:60]}...")
-        broadcast_sse({"event": "new_audio", "filename": f"tts_{file_hash}.mp3", "timestamp": time.time()})
-        return True
-    except subprocess.CalledProcessError as e:
-        error_msg = e.stderr.decode() if e.stderr else str(e)
-        logger.error(f"❌ TTS error: {error_msg}")
-        log_to_queue("error", f"TTS Error: {error_msg}")
-        return False
-    except Exception as e:
-        logger.error(f"❌ TTS error: {e}")
-        log_to_queue("error", f"TTS Error: {e}")
-        return False
+    return tts_runner.enqueue(text=text, voice=voice, rate=rate, volume=volume, pitch=pitch, **kwargs)
 
 def should_tts_message(event: dict) -> (bool, str, dict):
     if not config.get("tts_enabled", True):
@@ -392,7 +234,7 @@ def should_tts_message(event: dict) -> (bool, str, dict):
             return False, "", {}
         is_broadcaster = event.get("is_broadcaster", False)
         if is_broadcaster:
-            if config.get("filter_broadcaster", True):
+            if config.get("filter_broadcaster", False):
                 return False, "", {}
             else:
                 skip_role_check = True
@@ -464,14 +306,15 @@ def should_tts_message(event: dict) -> (bool, str, dict):
         if not allowed_by_role:
             return False, "", {}
 
-    user_voice_cfg = config.get("user_voice_map", {}).get(user, config.get("voice"))
+    default_voice = config.get("xtts_voice") if isinstance(tts_engine, XTTSv2Engine) else config.get("voice")
+    user_voice_cfg = config.get("user_voice_map", {}).get(user, default_voice)
     if isinstance(user_voice_cfg, dict):
-        voice = user_voice_cfg.get("voice", config["voice"])
+        voice = user_voice_cfg.get("voice", default_voice)
         rate = _normalize_tts_param(user_voice_cfg.get("rate", config.get("rate", "+0%")), '%')
         volume = _normalize_tts_param(user_voice_cfg.get("volume", config.get("volume", "+0%")), '%')
         pitch = _normalize_tts_param(user_voice_cfg.get("pitch", config.get("pitch", "+0Hz")), 'Hz')
     else:
-        voice = user_voice_cfg if isinstance(user_voice_cfg, str) else config["voice"]
+        voice = user_voice_cfg if isinstance(user_voice_cfg, str) else default_voice
         rate = _normalize_tts_param(config.get("rate", "+0%"), '%')
         volume = _normalize_tts_param(config.get("volume", "+0%"), '%')
         pitch = _normalize_tts_param(config.get("pitch", "+0Hz"), 'Hz')
@@ -592,14 +435,17 @@ def process_event(event_data: dict):
     if config.get("save_audio", True):
         tts_wrapper(text, voice=voice, rate=rate, volume=volume, pitch=pitch)
     else:
-        broadcast_sse({
+        play_data = {
             "event": "play",
             "text": text,
             "voice": voice,
             "rate": rate,
             "volume": volume,
             "pitch": pitch
-        })
+        }
+        if isinstance(tts_engine, XTTSv2Engine):
+            play_data["engine"] = "xtts"
+        broadcast_sse(play_data)
     
     log_to_queue("event", text, event_data.get("user"))
 
@@ -647,14 +493,17 @@ def handle_message(event: dict):
                 pitch=tts_params.get("pitch")
             )
         else:
-            broadcast_sse({
+            play_data = {
                 "event": "play",
                 "text": processed_text,
                 "voice": tts_params.get("voice"),
                 "rate": tts_params.get("rate"),
                 "volume": tts_params.get("volume"),
                 "pitch": tts_params.get("pitch")
-            })
+            }
+            if isinstance(tts_engine, XTTSv2Engine):
+                play_data["engine"] = "xtts"
+            broadcast_sse(play_data)
     elif event_type == "event":
         # Старый формат (для обратной совместимости)
         process_event(event.get("event_data", event))
@@ -814,12 +663,14 @@ def index():
 
 @app.route("/api/status")
 def api_status():
+    engine_type = "xtts" if isinstance(tts_engine, XTTSv2Engine) else "edge-tts"
     return jsonify({
         "tts_ready": tts_engine.is_ready(),
+        "tts_engine": engine_type,
         "twitch_running": twitch_running,
         "channel": config.get("twitch_channel", ""),
         "login": config.get("twitch_login", ""),
-        "queue_size": message_queue.qsize(),
+        "queue_size": runtime_events.log_count(),
         "has_token": bool(config.get("twitch_token"))
     })
 
@@ -838,14 +689,15 @@ def get_config():
         "user_cooldown", "filter_broadcaster", "save_audio", "tts_enabled", "read_all_messages",
         "read_only_answered",         "role_filters", "filter_links", "filter_emotes", "filter_emoji", "use_keywords",
         "keywords", "strip_keywords_from_tts", "ignore_chars", "blacklist_users", "whitelist_users",
-        "user_voice_map", "text_replacements", "events"
+        "user_voice_map", "text_replacements", "events",
+        "tts_engine", "xtts_voice", "xtts_language", "xtts_temperature", "xtts_repetition_penalty"
     ]
     result = {k: config.get(k) for k in safe_keys if k in config}
     return jsonify(result)
 
 @app.route("/api/config", methods=["POST"])
 def api_config():
-    global config
+    global config, tts_engine
     data = request.json or {}
     for key in data:
         if key in DEFAULT_CONFIG:
@@ -882,20 +734,21 @@ def api_config():
             ev_cfg.pop("default_voice", None)
 
     if save_config(config):
-        tts_engine.voice = config["voice"]
-        logger.info("⚙️ TTS config saved")
+        new_engine = config.get("tts_engine", "edge-tts")
+        if isinstance(tts_engine, XTTSv2Engine) and new_engine != "xtts":
+            tts_engine = TTSEngine(voice=config["voice"])
+        elif isinstance(tts_engine, TTSEngine) and new_engine == "xtts":
+            logger.info("XTTS engine selected, loading in background")
+            _start_background_xtts_load()
+        if isinstance(tts_engine, TTSEngine):
+            tts_engine.voice = config["voice"]
+        logger.info(" Config saved")
         return jsonify({"status": "saved"})
     return jsonify({"error": "Save failed"}), 500
 
 @app.route("/api/logs")
 def api_logs():
-    logs = []
-    while not message_queue.empty() and len(logs) < 50:
-        try:
-            logs.append(message_queue.get_nowait())
-        except:
-            break
-    return jsonify(logs)
+    return jsonify(runtime_events.logs(limit=50))
 
 @app.route("/api/emotes")
 def api_emotes():
@@ -1069,13 +922,22 @@ def api_generate():
     if not text:
         return jsonify({"error": "Empty text"}), 400
     try:
-        output_path = tts_engine.generate(
-            text=text,
-            voice=data.get("voice", config["voice"]),
-            rate=data.get("rate", config["rate"]),
-            volume=data.get("volume", config["volume"]),
-            pitch=data.get("pitch", config["pitch"])
-        )
+        if isinstance(tts_engine, XTTSv2Engine):
+            output_path = tts_engine.generate(
+                text=text,
+                voice=data.get("voice") or data.get("xtts_voice") or config.get("xtts_voice", "female_01.wav"),
+                language=data.get("language") or data.get("xtts_language") or config.get("xtts_language", "ru"),
+                temperature=float(data.get("temperature") or data.get("xtts_temperature") or config.get("xtts_temperature", 0.75)),
+                repetition_penalty=float(data.get("repetition_penalty") or data.get("xtts_repetition_penalty") or config.get("xtts_repetition_penalty", 10.0)),
+            )
+        else:
+            output_path = tts_engine.generate(
+                text=text,
+                voice=data.get("voice", config["voice"]),
+                rate=data.get("rate", config["rate"]),
+                volume=data.get("volume", config["volume"]),
+                pitch=data.get("pitch", config["pitch"])
+            )
         return jsonify({"success": True, "output": Path(output_path).name})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
@@ -1104,6 +966,27 @@ def api_tts_stream():
     volume = _normalize_tts_param(request.args.get("volume", config["volume"]), '%')
     pitch = _normalize_tts_param(request.args.get("pitch", config["pitch"]), 'Hz')
 
+    if isinstance(tts_engine, XTTSv2Engine):
+        xtts_voice = request.args.get("voice") or config.get("xtts_voice", "female_01.wav")
+        xtts_language = request.args.get("language") or config.get("xtts_language", "ru")
+        xtts_temperature = float(request.args.get("temperature") or config.get("xtts_temperature", 0.75))
+        xtts_repetition_penalty = float(request.args.get("repetition_penalty") or config.get("xtts_repetition_penalty", 10.0))
+        output_path = tts_engine.generate(
+            text=text,
+            voice=xtts_voice,
+            language=xtts_language,
+            temperature=xtts_temperature,
+            repetition_penalty=xtts_repetition_penalty,
+        )
+        with open(output_path, 'rb') as f:
+            audio_data = f.read()
+        try:
+            os.unlink(output_path)
+        except Exception:
+            pass
+        return Response(audio_data, mimetype="audio/wav",
+                        headers={"Content-Disposition": "inline", "Cache-Control": "no-cache"})
+
     def generate():
         proc = None
         try:
@@ -1116,7 +999,7 @@ def api_tts_stream():
             proc.wait()
             if proc.returncode != 0:
                 err = proc.stderr.read().decode(errors='ignore') if proc.stderr else ''
-                logger.error(f"edge-tts завершился с кодом {proc.returncode}: {err[:200]}")
+                logger.error(f"TTS stream завершился с кодом {proc.returncode}: {err[:200]}")
         except Exception as e:
             logger.error(f"Stream TTS error: {e}")
             yield b""
@@ -1131,19 +1014,65 @@ def api_tts_stream():
 
     return Response(generate(), mimetype="audio/mpeg", headers={"Content-Disposition": "inline", "Cache-Control": "no-cache"})
 
+@app.route("/api/send_chat", methods=["POST"])
+def api_send_chat():
+    global twitch_bot
+    data = request.json or {}
+    text = data.get("text", "").strip()
+    if not text:
+        return jsonify({"success": False, "error": "Пустой текст"}), 400
+    if not twitch_bot or not twitch_bot.is_connected():
+        return jsonify({"success": False, "error": "Бот не подключён к чату"}), 503
+    if twitch_bot.send_message(text):
+        log_to_queue("system", f"📤 Отправлено в чат: {text[:60]}...")
+        return jsonify({"success": True})
+    return jsonify({"success": False, "error": "Ошибка отправки"}), 500
+
 @app.route("/api/voices")
 def api_voices():
     try:
-        return jsonify(tts_engine.list_voices())
+        voices = tts_engine.list_voices()
+        if isinstance(tts_engine, XTTSv2Engine):
+            return jsonify({"engine": "xtts", "voices": voices, "languages": tts_engine.list_languages()})
+        return jsonify({"engine": "edge-tts", "voices": voices})
     except:
-        return jsonify([])
+        return jsonify({"engine": "edge-tts", "voices": []})
+
+@app.route("/api/tts/engine", methods=["GET"])
+def api_tts_engine():
+    engine_type = "xtts" if isinstance(tts_engine, XTTSv2Engine) else "edge-tts"
+    info = {"engine": engine_type, "ready": tts_engine.is_ready()}
+    if engine_type == "xtts":
+        info["model_downloaded"] = tts_engine.is_model_downloaded()
+        info["download_progress"] = tts_engine.download_progress()
+    return jsonify(info)
+
+@app.route("/api/voices/upload", methods=["POST"])
+def api_voices_upload():
+    if "file" not in request.files:
+        return jsonify({"error": "No file"}), 400
+    file = request.files["file"]
+    if file.filename == "":
+        return jsonify({"error": "Empty filename"}), 400
+    ext = Path(file.filename).suffix.lower()
+    if ext not in (".wav", ".mp3", ".ogg", ".flac"):
+        return jsonify({"error": "Unsupported format. Use wav, mp3, ogg, flac"}), 400
+    filename = secure_filename(file.filename)
+    dest = VOICES_DIR / filename
+    file.save(str(dest))
+    logger.info(f"Voice uploaded: {filename}")
+    return jsonify({"status": "ok", "filename": filename})
+
+@app.route("/api/tts/languages")
+def api_tts_languages():
+    if isinstance(tts_engine, XTTSv2Engine):
+        return jsonify(tts_engine.list_languages())
+    return jsonify([])
 
 @app.route("/api/sse")
 def api_sse():
     def event_stream():
-        client_queue = queue.Queue(maxsize=20)
-        with sse_lock:
-            sse_clients.append(client_queue)
+        client_queue = runtime_events.add_sse_client()
         try:
             yield f"data: {json.dumps({'event': 'connected'})}\n\n"
             while True:
@@ -1155,9 +1084,7 @@ def api_sse():
         except GeneratorExit:
             pass
         finally:
-            with sse_lock:
-                if client_queue in sse_clients:
-                    sse_clients.remove(client_queue)
+            runtime_events.remove_sse_client(client_queue)
     return Response(event_stream(), mimetype="text/event-stream")
 
 @app.route("/api/test_event", methods=["POST"])
@@ -1253,29 +1180,61 @@ def print_banner():
 ╔══════════════════════════════════════════════════════════╗
 ║  🎙️  Twitch TTS Server v7.9.2 (Унифицированные награды)║
 ║  🌐 Web GUI:  http://{config['host']}:{config['port']}                    ║
-║  🎙️  TTS:      edge-tts ({config['voice']})          ║
+║  🎙️  TTS:      {'XTTS' if isinstance(tts_engine, XTTSv2Engine) else 'edge-tts'} ({config.get('xtts_voice') if config.get('tts_engine') == 'xtts' else config.get('voice', 'ru-RU-SvetlanaNeural')})          ║
 ║  💾 Save mode: {'ON' if config.get('save_audio', True) else 'OFF (streaming)'}   ║
 ╚══════════════════════════════════════════════════════════╝
 """
     print(banner)
     logger.info("🚀 Server starting...")
 
+def _start_background_xtts_load():
+    def _load():
+        global tts_engine, tts_runner
+        try:
+            xtts = XTTSv2Engine(
+                voice=config.get("xtts_voice", "female_01.wav"),
+                language=config.get("xtts_language", "ru"),
+                temperature=float(config.get("xtts_temperature", 0.75)),
+                repetition_penalty=float(config.get("xtts_repetition_penalty", 10.0)),
+            )
+            _ = xtts.model
+            if config.get("tts_engine") == "xtts":
+                tts_engine = xtts
+                if tts_runner:
+                    tts_runner.engine = xtts
+                logger.info("✅ XTTS model loaded, engine swapped")
+                broadcast_sse({"event": "engine_switched", "engine": "xtts"})
+        except Exception as e:
+            logger.error(f"❌ XTTS background loading failed: {e}")
+    threading.Thread(target=_load, daemon=True, name="xtts-loader").start()
+
 if __name__ == "__main__":
     # Save PID for start_server.bat to kill previous instance
     with open("server.pid", "w") as f:
         f.write(str(os.getpid()))
     print_banner()
+    tts_runner = TTSRunner(
+        engine=tts_engine,
+        get_config=lambda: config,
+        log_callback=log_to_queue,
+        event_callback=broadcast_sse,
+    )
+    tts_runner.start()
+    if config.get("tts_engine", "edge-tts") == "xtts":
+        _start_background_xtts_load()
     auto_start_twitch()
     try:
         app.run(
             host=config["host"],
             port=config["port"],
-            debug=True,
+            debug=False,
             threaded=True
         )
     except KeyboardInterrupt:
         logger.info("👋 Shutting down...")
     finally:
+        if tts_runner:
+            tts_runner.stop()
         if twitch_running and twitch_bot:
             twitch_bot.stop()
         stop_event_sub()

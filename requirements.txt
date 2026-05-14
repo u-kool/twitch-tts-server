@@ -2,3 +2,7 @@ flask>=2.3.0
 edge-tts>=6.1.0
 requests>=2.31.0
 twitchAPI>=3.10.0
+websockets
+# For XTTSv2 engine (voice cloning) - requires torch with CUDA:
+# pip install TTS torch torchaudio
+# See: https://github.com/erew123/alltalk_tts

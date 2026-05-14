@@ -29,7 +29,7 @@ class TTSEngine:
         output_path = self.outputs_dir / f"tts_{file_hash}.mp3"
         cmd = [
             "edge-tts", "--text", text, "--voice", voice,
-            "--rate", rate, "--volume", volume, "--pitch", pitch,
+            f"--rate={rate}", f"--volume={volume}", f"--pitch={pitch}",
             "--write-media", str(output_path)
         ]
         try:
@@ -49,7 +49,7 @@ class TTSEngine:
         voice = voice or self.voice or "ru-RU-SvetlanaNeural"
         cmd = [
             "edge-tts", "--text", text, "--voice", voice,
-            "--rate", rate, "--volume", volume, "--pitch", pitch,
+            f"--rate={rate}", f"--volume={volume}", f"--pitch={pitch}",
             "--write-media", "-"
         ]
         logger.info(f"🔊 Streaming TTS: {' '.join(cmd)}")

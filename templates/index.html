@@ -64,6 +64,12 @@
         .dynamic-list-item button { background:#53535f; border:none; color:white; padding:4px 8px; border-radius:4px; cursor:pointer; }
         .advanced-settings { background:#1e1e21; border-radius:8px; padding:8px; margin-top:8px; display:none; border-left:2px solid #9146FF; }
         .advanced-settings.show { display:block; }
+        .suggestions-wrap { position:relative; flex:1; }
+        .suggestions-wrap input { width:100%; box-sizing:border-box; }
+        .suggestions-box { position:absolute; top:100%; left:0; right:0; background:#2a2a2d; border:1px solid #555; border-radius:6px; max-height:150px; overflow-y:auto; display:none; z-index:1060; }
+        .suggestions-box.show { display:block; }
+        .suggestions-box div { padding:5px 8px; cursor:pointer; font-size:13px; }
+        .suggestions-box div:hover { background:#9146FF; }
         .modal-content { background:#18181b; color:#efeff1; }
         .modal-header { border-bottom-color:#2a2a2d; }
         .modal-footer { border-top-color:#2a2a2d; }
@@ -106,6 +112,10 @@
         </div>
         <div id="log-container" class="log-container">
             <div class="empty-chat">💬 Сообщения чата появятся здесь...</div>
+        </div>
+        <div style="display:flex; gap:8px; padding:10px 16px; background:#18181b; border-top:1px solid #2a2a2d; flex-shrink:0;">
+            <input type="text" id="chat-input" placeholder="Написать в чат..." style="flex:1; background:#2a2a2d; border:1px solid #3a3a3d; color:#efeff1; padding:8px 14px; border-radius:20px; font-size:14px; outline:none;">
+            <button id="chat-send-btn" style="background:#9146FF; border:none; color:white; padding:8px 18px; border-radius:20px; font-size:14px; font-weight:600; cursor:pointer; transition:background 0.2s;" onmouseover="this.style.background='#7c3aed'" onmouseout="this.style.background='#9146FF'">Отправить</button>
         </div>
     </div>
 
@@ -168,9 +178,29 @@
         </div>
         <div class="settings-body">
             <div class="voice-row">
+                <span class="voice-label">🧠 Движок TTS:</span>
+                <select id="engine-select" class="settings-select">
+                    <option value="edge-tts">edge-tts (Microsoft)</option>
+                    <option value="xtts">XTTSv2 (клонирование голоса)</option>
+                </select>
+            </div>
+            <div class="voice-row">
                 <span class="voice-label">🎤 Голос по умолчанию:</span>
                 <select id="voice-select" class="settings-select"><option>Загрузка...</option></select>
                 <button id="toggle-advanced-btn" class="action-btn" title="Расширенные настройки">⚙️</button>
+            </div>
+            <div id="xtts-settings" style="display:none;">
+                <div class="slider-row"><label>🌐 Язык</label>
+                    <select id="xtts-language-select" class="settings-select" style="flex:1;"></select>
+                </div>
+                <div class="slider-row"><label>🌡️ Температура</label><span class="slider-value" id="xtts-temperature-value">0.75</span><input type="range" id="xtts-temperature-slider" min="0" max="100" value="75"></div>
+                <div class="slider-row"><label>🔁 Повторений штраф</label><span class="slider-value" id="xtts-repetition-value">10.0</span><input type="range" id="xtts-repetition-slider" min="0" max="200" value="100"></div>
+                <div class="settings-group">
+                    <label>📁 Загрузить голосовой сэмпл</label>
+                    <input type="file" id="voice-upload-input" accept=".wav,.mp3,.ogg,.flac" style="color:white;">
+                    <button id="upload-voice-btn" class="action-btn" style="margin-top:5px; width:100%;">Загрузить</button>
+                </div>
+                <div id="model-status" style="margin-top:5px; font-size:12px; color:#aaa;"></div>
             </div>
             <div id="advanced-dropdown" class="advanced-dropdown">
                 <div class="advanced-header"><span>⚙️ Расширенные настройки TTS</span><button id="close-advanced-btn" class="advanced-close">✕</button></div>
@@ -365,11 +395,23 @@
         while (logContainer.children.length > 200) logContainer.firstChild.remove();
     }
 
+    const displayedLogKeys = new Set();
+    const MAX_LOG_KEYS = 500;
+
     async function fetchLogs() {
         try {
             const resp = await fetch('/api/logs');
             const logs = await resp.json();
-            logs.forEach(addLogToUI);
+            logs.forEach(log => {
+                const key = `${log.timestamp}_${log.type}_${log.user}_${log.text}`;
+                if (!displayedLogKeys.has(key)) {
+                    displayedLogKeys.add(key);
+                    addLogToUI(log);
+                }
+            });
+            if (displayedLogKeys.size > MAX_LOG_KEYS) {
+                displayedLogKeys.clear();
+            }
         } catch(e) { console.error(e); }
     }
 
@@ -469,18 +511,40 @@
     function addUsernameToCache(username) { if (username && !usernamesSet.has(username)) { usernamesSet.add(username); saveUsernameCache(); } }
 
     // ---------------------- Голоса ----------------------
+    let availableLanguages = [];
+
     async function loadVoices() {
         try {
             const resp = await fetch('/api/voices');
-            availableVoices = await resp.json();
+            const data = await resp.json();
+            const engine = data.engine || 'edge-tts';
+            availableVoices = data.voices || [];
+            availableLanguages = data.languages || [];
             const select = document.getElementById('voice-select');
             select.innerHTML = '';
-            availableVoices.forEach(v => {
-                const opt = document.createElement('option');
-                opt.value = v.name;
-                opt.textContent = `${v.name} (${v.gender}, ${v.locale})`;
-                select.appendChild(opt);
-            });
+            if (engine === 'xtts') {
+                availableVoices.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.name;
+                    opt.textContent = v.name;
+                    select.appendChild(opt);
+                });
+                const langSelect = document.getElementById('xtts-language-select');
+                langSelect.innerHTML = '';
+                availableLanguages.forEach(l => {
+                    const opt = document.createElement('option');
+                    opt.value = l.code;
+                    opt.textContent = l.name;
+                    langSelect.appendChild(opt);
+                });
+            } else {
+                availableVoices.forEach(v => {
+                    const opt = document.createElement('option');
+                    opt.value = v.name;
+                    opt.textContent = `${v.name} (${v.gender}, ${v.locale})`;
+                    select.appendChild(opt);
+                });
+            }
             renderUserVoiceMapInModal(userVoiceMap);
             renderEventsModal(eventsConfig);
         } catch(e) { console.error(e); }
@@ -500,12 +564,10 @@
             const pitch = isObj ? (cfg.pitch || '+0Hz') : '+0Hz';
             const div = document.createElement('div');
             div.className = 'dynamic-list-item';
-            const datalistId = `datalist-${Date.now()}-${Math.random()}`;
             div.innerHTML = `
-                <input type="text" placeholder="Имя пользователя" value="${escapeHtml(user)}" class="map-user" list="${datalistId}" style="flex:1;">
-                <datalist id="${datalistId}">${usernamesArray.map(u => `<option value="${escapeHtml(u)}">`).join('')}</datalist>
+                <input type="text" placeholder="Имя пользователя" value="${escapeHtml(user)}" class="map-user" style="flex:1;">
                 <select class="map-voice" style="flex:1;">
-                    ${availableVoices.map(v => `<option value="${escapeHtml(v.name)}" ${v.name === voice ? 'selected' : ''}>${escapeHtml(v.name)} (${v.gender}, ${v.locale})</option>`).join('')}
+                    ${availableVoices.map(v => `<option value="${escapeHtml(v.name)}" ${v.name === voice ? 'selected' : ''}>${escapeHtml(v.name)}${v.gender ? ` (${v.gender}, ${v.locale})` : ''}</option>`).join('')}
                 </select>
                 <button class="voice-advanced-btn" style="background:#9146FF;">⚙️</button>
                 <button class="remove-item">🗑️</button>
@@ -528,6 +590,7 @@
             volSlider.oninput = () => volSpan.textContent = volSlider.value + '%';
             pitchSlider.oninput = () => pitchSpan.textContent = pitchSlider.value + 'Hz';
             div.querySelector('.remove-item').onclick = () => div.remove();
+            setupUserSuggestions(div.querySelector('.map-user'), usernamesArray);
             container.appendChild(div);
         }
     }
@@ -552,6 +615,35 @@
         return map;
     }
 
+    function setupUserSuggestions(input, usernames) {
+        const wrap = document.createElement('div');
+        wrap.className = 'suggestions-wrap';
+        input.parentNode.insertBefore(wrap, input);
+        wrap.appendChild(input);
+        const box = document.createElement('div');
+        box.className = 'suggestions-box';
+        wrap.appendChild(box);
+        function showSuggestions() {
+            const val = input.value.toLowerCase();
+            const filtered = usernames.filter(u => u.toLowerCase().includes(val));
+            if (filtered.length === 0) { box.classList.remove('show'); return; }
+            box.innerHTML = filtered.map(u => `<div data-value="${escapeHtml(u)}">${escapeHtml(u)}</div>`).join('');
+            box.classList.add('show');
+        }
+        function hideSuggestions() { box.classList.remove('show'); }
+        input.addEventListener('focus', showSuggestions);
+        input.addEventListener('input', showSuggestions);
+        input.addEventListener('blur', () => setTimeout(hideSuggestions, 200));
+        box.addEventListener('mousedown', e => {
+            const div = e.target.closest('[data-value]');
+            if (div) {
+                input.value = div.dataset.value;
+                hideSuggestions();
+                input.dispatchEvent(new Event('input', { bubbles: true }));
+            }
+        });
+    }
+
     // ---------- Рендер окна событий (с исправлениями для reward) ----------
     function renderEventsModal(events) {
         const container = document.getElementById('events-modal-body');
@@ -574,7 +666,7 @@
             html += `<div class="event-block" data-event="${ev}">
                 <div class="event-header">
                     <label class="checkbox-label"><input type="checkbox" class="event-enabled" ${enabled ? 'checked' : ''}> <strong>${ev.replace('_',' ').toUpperCase()}</strong></label>
-                    <select class="event-voice-select">${availableVoices.map(v => `<option value="${v.name}" ${(voice===v.name) ? 'selected' : ''}>${v.name} (${v.gender}, ${v.locale})</option>`).join('')}</select>
+                    <select class="event-voice-select">${availableVoices.map(v => `<option value="${v.name}" ${(voice===v.name) ? 'selected' : ''}>${v.name}${v.gender ? ` (${v.gender}, ${v.locale})` : ''}</option>`).join('')}</select>
                     <button class="action-btn event-advanced-toggle">⚙️</button>
                 </div>
                 <div class="event-advanced-settings" style="display:none; margin-top:10px;">
@@ -774,8 +866,8 @@
                 <button class="remove-item">🗑️</button>
             `;
             div.querySelector('.remove-item').onclick = () => div.remove();
-            container.appendChild(div);
-        });
+        container.appendChild(div);
+    });
     }
 
     function getTextReplacementsFromUI() {
@@ -833,7 +925,27 @@
             document.getElementById('rate-slider').value = rate; updateRateLabel(rate);
             document.getElementById('volume-slider').value = vol; updateVolumeLabel(vol);
             document.getElementById('pitch-slider').value = pitch; updatePitchLabel(pitch);
-            if (d.voice) document.getElementById('voice-select').value = d.voice;
+            const engine = d.tts_engine || 'edge-tts';
+            document.getElementById('engine-select').value = engine;
+            document.getElementById('xtts-settings').style.display = engine === 'xtts' ? 'block' : 'none';
+            if (d.xtts_temperature) {
+                const tempVal = Math.round(parseFloat(d.xtts_temperature) * 100);
+                document.getElementById('xtts-temperature-slider').value = tempVal;
+                document.getElementById('xtts-temperature-value').textContent = d.xtts_temperature;
+            }
+            if (d.xtts_repetition_penalty) {
+                const repVal = Math.round(parseFloat(d.xtts_repetition_penalty) * 10);
+                document.getElementById('xtts-repetition-slider').value = repVal;
+                document.getElementById('xtts-repetition-value').textContent = d.xtts_repetition_penalty;
+            }
+            if (engine === 'xtts') {
+                if (d.xtts_voice) document.getElementById('voice-select').value = d.xtts_voice;
+                if (d.xtts_language && document.getElementById('xtts-language-select').querySelector(`option[value="${d.xtts_language}"]`)) {
+                    document.getElementById('xtts-language-select').value = d.xtts_language;
+                }
+            } else if (d.voice) {
+                document.getElementById('voice-select').value = d.voice;
+            }
             const readAll = document.getElementById('read-all-messages-checkbox').checked;
             document.getElementById('role-filters-section').style.display = readAll ? 'none' : 'block';
             const useKw = document.getElementById('use-keywords-checkbox').checked;
@@ -855,24 +967,46 @@
 
     async function testVoice() {
         try {
-            const rate = document.getElementById('rate-slider').value;
-            const volume = document.getElementById('volume-slider').value;
-            const pitch = document.getElementById('pitch-slider').value;
+            const engine = document.getElementById('engine-select').value;
             const voice = document.getElementById('voice-select').value;
-            const filename = await generateTTS("Тест голоса", voice, `${rate}%`, `${volume}%`, `${pitch}Hz`);
-            enqueueAudio(filename);
-            addSystemMessage('🔊 Тест добавлен в очередь');
+            if (engine === 'xtts') {
+                const lang = document.getElementById('xtts-language-select').value;
+                const temp = parseFloat(document.getElementById('xtts-temperature-slider').value) / 100;
+                const rep = parseFloat(document.getElementById('xtts-repetition-slider').value) / 10;
+                const resp = await fetch('/api/generate', {
+                    method:'POST',
+                    headers:{'Content-Type':'application/json'},
+                    body: JSON.stringify({text: "Тест голоса, привет мир", voice, language: lang, temperature: temp, repetition_penalty: rep})
+                });
+                const data = await resp.json();
+                if (data.output) enqueueAudio(data.output);
+                addSystemMessage('🔊 Тест XTTS добавлен в очередь');
+            } else {
+                const rate = document.getElementById('rate-slider').value;
+                const volume = document.getElementById('volume-slider').value;
+                const pitch = document.getElementById('pitch-slider').value;
+                const filename = await generateTTS("Тест голоса", voice, `${rate}%`, `${volume}%`, `${pitch}Hz`);
+                enqueueAudio(filename);
+                addSystemMessage('🔊 Тест добавлен в очередь');
+            }
         } catch(e) { alert(`Ошибка: ${e.message}`); }
     }
 
     async function saveAllSettings() {
         const newEvents = collectEventsFromModal();
         const newUserVoiceMap = getUserVoiceMapFromModal();
+        const engine = document.getElementById('engine-select').value;
+        const selectedVoice = document.getElementById('voice-select').value;
         const cfg = {
-            voice: document.getElementById('voice-select').value,
+            tts_engine: engine,
+            voice: engine === 'xtts' ? (currentConfig?.voice || config?.voice || 'ru-RU-SvetlanaNeural') : selectedVoice,
             rate: `${parseInt(document.getElementById('rate-slider').value)}%`,
             volume: `${parseInt(document.getElementById('volume-slider').value)}%`,
             pitch: `${parseInt(document.getElementById('pitch-slider').value)}Hz`,
+            xtts_voice: engine === 'xtts' ? selectedVoice : (currentConfig?.xtts_voice || 'female_01.wav'),
+            xtts_language: engine === 'xtts' ? document.getElementById('xtts-language-select').value : 'ru',
+            xtts_temperature: engine === 'xtts' ? parseFloat(document.getElementById('xtts-temperature-slider').value) / 100 : 0.75,
+            xtts_repetition_penalty: engine === 'xtts' ? parseFloat(document.getElementById('xtts-repetition-slider').value) / 10 : 10.0,
             event_cooldown: parseInt(document.getElementById('event-cooldown-input').value),
             min_length: parseInt(document.getElementById('min-length-input').value),
             max_length: parseInt(document.getElementById('max-length-input').value),
@@ -909,8 +1043,69 @@
         } catch(e) { alert('Ошибка сохранения'); }
     }
 
+    // ---------- Engine switch ----------
+    document.getElementById('engine-select').addEventListener('change', async function() {
+        const isXtts = this.value === 'xtts';
+        document.getElementById('xtts-settings').style.display = isXtts ? 'block' : 'none';
+        await loadVoices();
+        if (isXtts) updateModelStatus();
+    });
+
+    document.getElementById('xtts-temperature-slider').addEventListener('input', function() {
+        document.getElementById('xtts-temperature-value').textContent = (parseFloat(this.value) / 100).toFixed(2);
+    });
+    document.getElementById('xtts-repetition-slider').addEventListener('input', function() {
+        document.getElementById('xtts-repetition-value').textContent = (parseFloat(this.value) / 10).toFixed(1);
+    });
+
+    // ---------- Voice upload ----------
+    document.getElementById('upload-voice-btn').addEventListener('click', async function() {
+        const input = document.getElementById('voice-upload-input');
+        const file = input.files[0];
+        if (!file) { alert('Выберите файл'); return; }
+        const formData = new FormData();
+        formData.append('file', file);
+        try {
+            const r = await fetch('/api/voices/upload', { method:'POST', body: formData });
+            const data = await r.json();
+            if (r.ok) {
+                alert('Голос загружен: ' + data.filename);
+                input.value = '';
+                loadVoices();
+            } else {
+                alert('Ошибка: ' + (data.error || 'unknown'));
+            }
+        } catch(e) { alert('Ошибка загрузки: ' + e.message); }
+    });
+
+    // ---------- Model status / download ----------
+    async function updateModelStatus() {
+        const el = document.getElementById('model-status');
+        if (document.getElementById('engine-select').value !== 'xtts') {
+            el.innerHTML = '';
+            return;
+        }
+        try {
+            const r = await fetch('/api/tts/engine');
+            const d = await r.json();
+            if (d.model_downloaded) {
+                el.innerHTML = '✅ Модель загружена';
+            } else if (d.download_progress && d.download_progress.downloaded > 0) {
+                const p = d.download_progress;
+                el.innerHTML = `⏳ Загрузка модели: ${p.downloaded}/${p.total} файлов`;
+            } else {
+                el.innerHTML = '⚠️ Модель не скачана. Запусти download_xtts_model.bat';
+            }
+        } catch(e) { el.innerHTML = ''; console.error(e); }
+    }
     // ---------- UI настройки ----------
-    function openSettings() { settingsPanel.classList.add('open'); settingsOverlay.classList.add('active'); loadCurrentConfig(); loadVoices(); }
+    async function openSettings() {
+        settingsPanel.classList.add('open');
+        settingsOverlay.classList.add('active');
+        await loadVoices();
+        await loadCurrentConfig();
+        updateModelStatus();
+    }
     function closeSettings() { settingsPanel.classList.remove('open'); settingsOverlay.classList.remove('active'); }
 
     // ---------- Инициализация ----------
@@ -952,10 +1147,8 @@
         const container = document.getElementById('user-voice-list-modal');
         const div = document.createElement('div');
         div.className = 'dynamic-list-item';
-        const datalistId = `datalist-${Date.now()}`;
         div.innerHTML = `
-            <input type="text" placeholder="Имя пользователя" class="map-user" list="${datalistId}" style="flex:1;">
-            <datalist id="${datalistId}">${Array.from(usernamesSet).sort().map(u => `<option value="${escapeHtml(u)}">`).join('')}</datalist>
+            <input type="text" placeholder="Имя пользователя" class="map-user" style="flex:1;">
             <select class="map-voice" style="flex:1;">${availableVoices.map(v => `<option value="${v.name}">${v.name}</option>`).join('')}</select>
             <button class="voice-advanced-btn">⚙️</button>
             <button class="remove-item">🗑️</button>
@@ -972,6 +1165,7 @@
         div.querySelector('.adv-rate').oninput = function() { this.parentNode.querySelector('.adv-rate-val').textContent = this.value + '%'; };
         div.querySelector('.adv-volume').oninput = function() { this.parentNode.querySelector('.adv-vol-val').textContent = this.value + '%'; };
         div.querySelector('.adv-pitch').oninput = function() { this.parentNode.querySelector('.adv-pitch-val').textContent = this.value + 'Hz'; };
+        setupUserSuggestions(div.querySelector('.map-user'), Array.from(usernamesSet).sort());
         container.appendChild(div);
     });
 
@@ -987,6 +1181,23 @@
         div.querySelector('.remove-item').onclick = () => div.remove();
         container.appendChild(div);
     });
+
+    document.getElementById('chat-send-btn').addEventListener('click', sendChatMessage);
+    document.getElementById('chat-input').addEventListener('keydown', (e) => { if (e.key === 'Enter') sendChatMessage(); });
+
+    async function sendChatMessage() {
+        const input = document.getElementById('chat-input');
+        const text = input.value.trim();
+        if (!text) return;
+        input.value = '';
+        try {
+            const r = await fetch('/api/send_chat', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ text }) });
+            const data = await r.json();
+            if (!data.success) addSystemMessage(`❌ Ошибка: ${data.error || 'неизвестная'}`);
+        } catch(e) {
+            addSystemMessage(`❌ Ошибка отправки: ${e.message}`);
+        }
+    }
 
     document.addEventListener('click', () => { audioUnlocked = true; if (audioQueue.length && !isPlaying) playNext(); });
 
