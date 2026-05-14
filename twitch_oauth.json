@@ -1,0 +1,4 @@
+{
+  "client_id": "your Twitch application client ID",
+  "client_secret": "your rotated Twitch application client secret"
+}
